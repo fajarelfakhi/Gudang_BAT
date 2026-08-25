@@ -1,0 +1,1936 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GUDANG BAT - Sistem Manajemen Gudang Multi-User</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome 6 icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+
+    <!-- ==========================================================================
+         1. HALAMAN LOGIN & DAFTAR AKUN DEMO
+         ========================================================================== -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-wrapper">
+            <!-- Banner Sisi Kiri -->
+            <div class="login-banner">
+                <div class="brand-large">
+                    <div class="brand-large-icon">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                    </div>
+                    <div class="brand-large-text">
+                        <h1>GUDANG<span>BAT</span></h1>
+                        <p>SISTEM MANAJEMEN GUDANG MULTI-USER</p>
+                    </div>
+                </div>
+
+                <div class="banner-illustration">
+                    <div class="illustration-box">
+                        <i class="fa-solid fa-warehouse"></i>
+                    </div>
+                    <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">Kelola Gudang Lebih Efisien</h3>
+                    <p style="font-size: 13px; opacity: 0.85; max-width: 320px; margin: 0 auto;">
+                        Sistem manajemen stok, closing resi, upah pekerja, dan booking seller secara terintegrasi dan real-time.
+                    </p>
+                </div>
+
+                <div class="banner-features">
+                    <div class="feature-item">
+                        <i class="fa-solid fa-bolt"></i>
+                        <span>Real-Time Stok</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fa-solid fa-barcode"></i>
+                        <span>Closing Resi</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fa-solid fa-calculator"></i>
+                        <span>Upah Otomatis</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Login Sisi Kanan -->
+            <div class="login-content">
+                <div class="login-header">
+                    <h2>Selamat Datang</h2>
+                    <p>Silakan masuk ke akun GUDANG BAT Anda untuk melanjutkan</p>
+                </div>
+
+                <div id="login-alert" class="alert alert-danger hidden">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span id="login-alert-text">Username atau password salah.</span>
+                </div>
+
+                <form id="form-login">
+                    <div class="form-group">
+                        <label class="form-label" for="login-username">Username atau Email</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-user left-icon"></i>
+                            <input type="text" id="login-username" class="form-control" placeholder="Masukkan username atau email" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="login-password">Password</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-lock left-icon"></i>
+                            <input type="password" id="login-password" class="form-control" placeholder="Masukkan password Anda" required>
+                            <i class="fa-solid fa-eye password-toggle" id="toggle-password"></i>
+                        </div>
+                    </div>
+
+                    <div class="form-actions-row">
+                        <label class="remember-me">
+                            <input type="checkbox" id="remember-me">
+                            <span>Ingat Saya</span>
+                        </label>
+                        <a href="#" id="link-forgot-password" style="font-weight: 600;">Lupa Password?</a>
+                    </div>
+
+                    <button type="submit" class="btn-login" id="btn-login-submit">
+                        <i class="fa-solid fa-right-to-bracket"></i> Masuk ke Sistem
+                    </button>
+                </form>
+
+                <!-- DAFTAR AKUN DEMO SIAP UJI -->
+                <div class="demo-accounts-box">
+                    <div class="demo-title">
+                        <i class="fa-solid fa-users-gear"></i> Daftar Akun Akses Cepat (Uji Coba)
+                    </div>
+                    <div class="demo-cards-list">
+                        <!-- Akun Admin -->
+                        <div class="demo-account-card">
+                            <div class="demo-account-info">
+                                <div class="demo-role-icon role-admin">
+                                    <i class="fa-solid fa-user-shield"></i>
+                                </div>
+                                <div class="demo-account-text">
+                                    <strong>Admin Utama (Full Access)</strong>
+                                    <small>user: <code>admin</code> | pass: <code>admin123</code></small>
+                                </div>
+                            </div>
+                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('admin', 'admin123')">
+                                Gunakan Akun
+                            </button>
+                        </div>
+
+                        <!-- Akun Gudang -->
+                        <div class="demo-account-card">
+                            <div class="demo-account-info">
+                                <div class="demo-role-icon role-gudang">
+                                    <i class="fa-solid fa-dolly"></i>
+                                </div>
+                                <div class="demo-account-text">
+                                    <strong>Pekerja Gudang</strong>
+                                    <small>user: <code>gudang</code> | pass: <code>gudang123</code></small>
+                                </div>
+                            </div>
+                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('gudang', 'gudang123')">
+                                Gunakan Akun
+                            </button>
+                        </div>
+
+                        <!-- Akun Seller -->
+                        <div class="demo-account-card">
+                            <div class="demo-account-info">
+                                <div class="demo-role-icon role-seller">
+                                    <i class="fa-solid fa-store"></i>
+                                </div>
+                                <div class="demo-account-text">
+                                    <strong>Seller / Penjual</strong>
+                                    <small>user: <code>seller</code> | pass: <code>seller123</code></small>
+                                </div>
+                            </div>
+                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('seller', 'seller123')">
+                                Gunakan Akun
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         2. TAMPILAN DASHBOARD UTAMA MULTI-USER
+         ========================================================================== -->
+    <div id="app-layout" class="app-layout hidden">
+        
+        <!-- SIDEBAR NAVIGASI DINAMIS BERDASARKAN ROLE -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <div class="sidebar-brand-icon">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                    </div>
+                    <div class="sidebar-brand-text">
+                        <h2 id="sidebar-app-name">GUDANG<span>BAT</span></h2>
+                        <p id="sidebar-app-sub">Manajemen Gudang Multi-User</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MENU ADMIN -->
+            <nav class="sidebar-nav hidden" id="nav-admin">
+                <div class="nav-group-label">UTAMA & STATISTIK</div>
+                <button class="nav-link active" data-view="admin-dashboard">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Dashboard</span>
+                </button>
+
+                <div class="nav-group-label">STOK & BARANG</div>
+                <button class="nav-link" data-view="admin-products">
+                    <i class="fa-solid fa-box-archive"></i>
+                    <span>Manajemen Produk</span>
+                </button>
+                <button class="nav-link" data-view="admin-stocks">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                    <span>Stok Barang</span>
+                </button>
+                <button class="nav-link" data-view="admin-stock-ins">
+                    <i class="fa-solid fa-truck-ramp-box"></i>
+                    <span>Barang Masuk</span>
+                </button>
+                <button class="nav-link" data-view="admin-stock-outs">
+                    <i class="fa-solid fa-truck-arrow-right"></i>
+                    <span>Barang Keluar</span>
+                </button>
+
+                <div class="nav-group-label">OPERASIONAL & PENJUALAN</div>
+                <button class="nav-link" data-view="admin-work-management">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Pekerjaan Gudang</span>
+                </button>
+                <button class="nav-link" data-view="admin-seller-bookings">
+                    <i class="fa-solid fa-bookmark"></i>
+                    <span>Booking Seller</span>
+                    <span class="nav-badge badge-purple" id="badge-admin-bookings">0</span>
+                </button>
+                <button class="nav-link" data-view="admin-sales-closing">
+                    <i class="fa-solid fa-barcode"></i>
+                    <span>Closing Resi Penjualan</span>
+                </button>
+                <button class="nav-link" data-view="admin-damaged-goods">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span>Barang Cacat</span>
+                </button>
+                <button class="nav-link" data-view="admin-returned-goods">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>Barang Retur</span>
+                </button>
+
+                <div class="nav-group-label">KEUANGAN & UPAH</div>
+                <button class="nav-link" data-view="admin-wages">
+                    <i class="fa-solid fa-money-bill-wave"></i>
+                    <span>Upah Pekerja</span>
+                </button>
+                <button class="nav-link" data-view="admin-payouts">
+                    <i class="fa-solid fa-hand-holding-dollar"></i>
+                    <span>Pengajuan Pencairan</span>
+                    <span class="nav-badge badge-warning" id="badge-admin-payouts">0</span>
+                </button>
+
+                <div class="nav-group-label">LAPORAN & SISTEM</div>
+                <button class="nav-link" data-view="admin-reports">
+                    <i class="fa-solid fa-file-invoice"></i>
+                    <span>Laporan & Statistik</span>
+                </button>
+                <button class="nav-link" data-view="admin-users">
+                    <i class="fa-solid fa-users"></i>
+                    <span>Pengguna System</span>
+                </button>
+                <button class="nav-link" data-view="admin-activity-logs">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                    <span>Log Aktivitas</span>
+                </button>
+                <button class="nav-link" data-view="admin-settings">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>Pengaturan Gudang</span>
+                </button>
+            </nav>
+
+            <!-- MENU GUDANG -->
+            <nav class="sidebar-nav hidden" id="nav-gudang">
+                <div class="nav-group-label">OPERASIONAL GUDANG</div>
+                <button class="nav-link active" data-view="gudang-dashboard">
+                    <i class="fa-solid fa-gauge-high"></i>
+                    <span>Dashboard Saya</span>
+                </button>
+                <button class="nav-link" data-view="gudang-targets">
+                    <i class="fa-solid fa-bullseye"></i>
+                    <span>Target Hari Ini</span>
+                </button>
+                <button class="nav-link" data-view="gudang-work-report">
+                    <i class="fa-solid fa-clipboard-check"></i>
+                    <span>Laporan Pekerjaan</span>
+                </button>
+                <button class="nav-link" data-view="gudang-work-history">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                    <span>Riwayat Pekerjaan</span>
+                </button>
+
+                <div class="nav-group-label">PENDAPATAN & UPAH</div>
+                <button class="nav-link" data-view="gudang-earnings">
+                    <i class="fa-solid fa-wallet"></i>
+                    <span>Pendapatan & Upah</span>
+                </button>
+                <button class="nav-link" data-view="gudang-payout-request">
+                    <i class="fa-solid fa-hand-holding-dollar"></i>
+                    <span>Ajukan Pencairan</span>
+                </button>
+                <button class="nav-link" data-view="gudang-profile">
+                    <i class="fa-solid fa-id-card"></i>
+                    <span>Profil Saya</span>
+                </button>
+            </nav>
+
+            <!-- MENU SELLER -->
+            <nav class="sidebar-nav hidden" id="nav-seller">
+                <div class="nav-group-label">PORTAL SELLER</div>
+                <button class="nav-link active" data-view="seller-dashboard">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Dashboard Seller</span>
+                </button>
+                <button class="nav-link" data-view="seller-stock-view">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                    <span>Stok Gudang Available</span>
+                </button>
+                <button class="nav-link" data-view="seller-booking-form">
+                    <i class="fa-solid fa-bookmark"></i>
+                    <span>Booking Stok Baru</span>
+                </button>
+                <button class="nav-link" data-view="seller-booking-history">
+                    <i class="fa-solid fa-list-ul"></i>
+                    <span>Riwayat Booking</span>
+                </button>
+                <button class="nav-link" data-view="seller-sales-status">
+                    <i class="fa-solid fa-bag-shopping"></i>
+                    <span>Status Penjualan</span>
+                </button>
+                <button class="nav-link" data-view="seller-profile">
+                    <i class="fa-solid fa-user-gear"></i>
+                    <span>Profil Seller</span>
+                </button>
+            </nav>
+
+            <!-- FOOTER USER PROFILE & LOGOUT -->
+            <div class="sidebar-footer">
+                <div class="user-profile-mini">
+                    <div class="avatar" id="user-avatar">A</div>
+                    <div class="user-info-mini">
+                        <h4 id="user-display-name">Budi Santoso</h4>
+                        <span class="user-role-badge badge-role-admin" id="user-display-role">ADMIN</span>
+                    </div>
+                    <button class="btn-icon" id="btn-logout" title="Keluar Akun" style="margin-left: auto;">
+                        <i class="fa-solid fa-right-from-bracket" style="color: #ef4444;"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN WORKSPACE CONTENT -->
+        <main class="main-wrapper">
+            <!-- TOP NAVBAR -->
+            <header class="top-navbar">
+                <div class="navbar-left">
+                    <button class="btn-icon" id="sidebar-toggle">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="page-title-box">
+                        <h2 id="page-title-text">Dashboard Admin</h2>
+                        <p id="page-subtitle-text">Ringkasan real-time aktivitas dan operasional gudang</p>
+                    </div>
+                </div>
+
+                <div class="navbar-right">
+                    <!-- Quick Scan Button for Admin -->
+                    <button class="btn btn-primary btn-sm" id="btn-top-scan-resi">
+                        <i class="fa-solid fa-barcode"></i> Scan Resi
+                    </button>
+
+                    <!-- Theme Toggle -->
+                    <button class="btn-icon" id="btn-theme-toggle" title="Ganti Tema Terang/Gelap">
+                        <i class="fa-solid fa-sun" id="theme-icon"></i>
+                    </button>
+
+                    <!-- Quick Sync Indicator -->
+                    <div style="font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
+                        <span>Terhubung Backend</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- DYNAMIC VIEW CONTAINER -->
+            <div class="content-body" id="view-container">
+                <!-- VIEW ADMIN DASHBOARD -->
+                <section id="view-admin-dashboard" class="app-view">
+                    <!-- Period Filter -->
+                    <div class="filter-bar">
+                        <div class="period-buttons">
+                            <button class="btn-period active" data-period="today">Hari Ini</button>
+                            <button class="btn-period" data-period="yesterday">Kemarin</button>
+                            <button class="btn-period" data-period="this_week">Minggu Ini</button>
+                            <button class="btn-period" data-period="this_month">Bulan Ini</button>
+                            <button class="btn-period" data-period="this_year">Tahun Ini</button>
+                            <button class="btn-period" data-period="custom">Custom Tanggal</button>
+                        </div>
+                        <div class="custom-date-range hidden" id="custom-date-range">
+                            <input type="date" id="filter-start-date">
+                            <span style="font-size: 12px; color: var(--text-muted);">s/d</span>
+                            <input type="date" id="filter-end-date">
+                            <button class="btn btn-primary btn-sm" id="btn-apply-custom-date">Terapkan</button>
+                        </div>
+                    </div>
+
+                    <!-- Stat Cards Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-box"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-total-products">0</h3>
+                                <p>Total Produk</p>
+                                <div class="stat-subtext">Kategori Aktif</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-boxes-stacked"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-total-physical-stock">0</h3>
+                                <p>Total Stok Fisik</p>
+                                <div class="stat-subtext">Ada di Gudang</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-circle-check"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-available-stock">0</h3>
+                                <p>Stok Tersedia</p>
+                                <div class="stat-subtext">Siap Dibooking/Jual</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-purple"><i class="fa-solid fa-bookmark"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-booked-stock">0</h3>
+                                <p>Stok Dibooking</p>
+                                <div class="stat-subtext">Reserved Seller</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-arrows-spin"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-process-stock">0</h3>
+                                <p>Stok Dalam Proses</p>
+                                <div class="stat-subtext">Checking & Packing</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-cart-shopping"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-sold-stock">0</h3>
+                                <p>Barang Terjual</p>
+                                <div class="stat-subtext">Tutup Closing Resi</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-damaged-stock">0</h3>
+                                <p>Barang Cacat</p>
+                                <div class="stat-subtext">Perlu Tindak Lanjut</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-red"><i class="fa-solid fa-rotate-left"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-returned-stock">0</h3>
+                                <p>Barang Retur</p>
+                                <div class="stat-subtext">Pengembalian Pembeli</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-truck-ramp-box"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-stock-in-qty">0</h3>
+                                <p>Barang Masuk</p>
+                                <div class="stat-subtext">Penerimaan Supplier</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-truck-arrow-right"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-stock-out-qty">0</h3>
+                                <p>Barang Keluar</p>
+                                <div class="stat-subtext">Non-Penjualan</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-purple"><i class="fa-solid fa-list-check"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-total-jobs">0</h3>
+                                <p>Pekerjaan Gudang</p>
+                                <div class="stat-subtext">Selesai Dikerjakan</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-clock"></i></div>
+                            <div class="stat-details">
+                                <h3 id="stat-unpaid-wages">Rp 0</h3>
+                                <p>Upah Belum Dibayar</p>
+                                <div class="stat-subtext">Akumulasi Worker</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Grid -->
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>Grafik Aktivitas Stok Barang</h3>
+                                <i class="fa-solid fa-chart-column text-primary"></i>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="chart-stock-activity"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>Grafik Status Barang Gudang</h3>
+                                <i class="fa-solid fa-chart-pie text-primary"></i>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="chart-goods-status"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>Grafik Produktivitas Pekerja Gudang</h3>
+                                <i class="fa-solid fa-chart-bar text-primary"></i>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="chart-worker-productivity"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity Table -->
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Aktivitas Terbaru Sistem</h3>
+                            <button class="btn btn-secondary btn-sm" onclick="renderAdminDashboard()">
+                                <i class="fa-solid fa-arrows-rotate"></i> Refresh Data
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu</th>
+                                        <th>Pengguna</th>
+                                        <th>Role</th>
+                                        <th>Aktivitas</th>
+                                        <th>Detail Perubahan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-recent-activities">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN MANAJEMEN PRODUK -->
+                <section id="view-admin-products" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="search-products" placeholder="Cari nama produk, SKU, kategori...">
+                            </div>
+                            <div class="toolbar-actions">
+                                <button class="btn btn-secondary btn-sm" id="btn-open-category-modal">
+                                    <i class="fa-solid fa-folder-plus"></i> Kelola Kategori
+                                </button>
+                                <button class="btn btn-primary btn-sm" id="btn-open-product-modal">
+                                    <i class="fa-solid fa-plus"></i> Tambah Produk Baru
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Foto</th>
+                                        <th>Nama Produk</th>
+                                        <th>SKU</th>
+                                        <th>Kategori</th>
+                                        <th>Varian Produk</th>
+                                        <th>Lokasi Gudang</th>
+                                        <th>Stok Min</th>
+                                        <th>Status</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-products-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN MANAJEMEN STOK -->
+                <section id="view-admin-stocks" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="search-stocks" placeholder="Cari produk / varian...">
+                            </div>
+                            <div class="toolbar-actions">
+                                <select id="filter-stock-category" class="form-control" style="width: auto; padding: 6px 12px;">
+                                    <option value="">Semua Kategori</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Foto</th>
+                                        <th>Produk & Varian</th>
+                                        <th>SKU</th>
+                                        <th>Stok Fisik</th>
+                                        <th>Stok Dibooking</th>
+                                        <th>Stok Tersedia</th>
+                                        <th>Dalam Proses</th>
+                                        <th>Stok Terjual</th>
+                                        <th>Lokasi</th>
+                                        <th>Status Stok</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-stocks-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN BARANG MASUK -->
+                <section id="view-admin-stock-ins" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Penerimaan Barang Masuk</h3>
+                            <button class="btn btn-primary btn-sm" id="btn-open-stock-in-modal">
+                                <i class="fa-solid fa-plus"></i> Catat Barang Masuk
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>No Dokumen</th>
+                                        <th>Supplier</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Masuk</th>
+                                        <th>Catatan</th>
+                                        <th>Petugas</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-stock-ins-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN BARANG KELUAR -->
+                <section id="view-admin-stock-outs" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Pengeluaran Barang (Non-Penjualan)</h3>
+                            <button class="btn btn-primary btn-sm" id="btn-open-stock-out-modal">
+                                <i class="fa-solid fa-plus"></i> Catat Barang Keluar
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>No Dokumen</th>
+                                        <th>Tujuan</th>
+                                        <th>Alasan Pengeluaran</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Catatan</th>
+                                        <th>Petugas</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-stock-outs-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN PEKERJAAN GUDANG -->
+                <section id="view-admin-work-management" class="app-view hidden">
+                    <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" id="btn-open-work-type-modal">
+                            <i class="fa-solid fa-list-check"></i> Kelola Jenis Pekerjaan & Tarif
+                        </button>
+                        <button class="btn btn-success" id="btn-open-work-target-modal">
+                            <i class="fa-solid fa-bullseye"></i> Buat Target Pekerjaan Harian
+                        </button>
+                    </div>
+
+                    <div class="card-table-wrapper" style="margin-bottom: 20px;">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Daftar Jenis Pekerjaan & Nominal Upah</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Jenis Pekerjaan</th>
+                                        <th>Nominal Upah</th>
+                                        <th>Terakhir Diubah</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-work-types"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Laporan Pekerjaan Gudang Yang Masuk</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu</th>
+                                        <th>Pekerja</th>
+                                        <th>Jenis Pekerjaan</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Kondisi</th>
+                                        <th>Tarif/Unit</th>
+                                        <th>Total Upah</th>
+                                        <th>Catatan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-work-reports">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN BOOKING SELLER -->
+                <section id="view-admin-seller-bookings" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Daftar Booking Stok Oleh Seller</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>No Booking</th>
+                                        <th>Tanggal</th>
+                                        <th>Nama Seller</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Booking</th>
+                                        <th>Masa Berlaku</th>
+                                        <th>Status Booking</th>
+                                        <th class="text-right">Aksi Persetujuan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-bookings-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN CLOSING RESI PENJUALAN -->
+                <section id="view-admin-sales-closing" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; margin-bottom: 24px;">
+                        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Scan Resi & Closing Penjualan</h3>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+                            Masukkan atau scan nomor resi pengiriman untuk menghubungkan dengan booking seller dan memperbarui status barang menjadi <strong>Terjual</strong>.
+                        </p>
+
+                        <div style="display: grid; gap: 12px; max-width: 760px;">
+                            <input type="text" id="input-closing-resi-no" class="form-control" placeholder="Scan Barcode atau ketik No Resi...">
+                            <select id="closing-booking-id" class="form-control">
+                                <option value="">-- Pilih booking aktif yang akan di-closing --</option>
+                            </select>
+                            <small style="color: var(--text-muted);">Pilih booking aktif agar resi ditutup ke produk, varian, jumlah, dan seller yang benar.</small>
+                            <div>
+                                <button class="btn btn-primary" id="btn-process-closing-scan">
+                                    <i class="fa-solid fa-qrcode"></i> Proses Closing
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Closing Penjualan</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>No Transaksi</th>
+                                        <th>No Resi</th>
+                                        <th>Tanggal Closing</th>
+                                        <th>Seller</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Terjual</th>
+                                        <th>Petugas Closing</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-closings-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN BARANG CACAT -->
+                <section id="view-admin-damaged-goods" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Daftar Laporan Barang Cacat</h3>
+                            <button class="btn btn-primary btn-sm" id="btn-open-damaged-modal">
+                                <i class="fa-solid fa-plus"></i> Laporkan Barang Cacat
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Alasan Kerusakan</th>
+                                        <th>Pelapor</th>
+                                        <th>Status Tindak Lanjut</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-damaged-goods-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN BARANG RETUR -->
+                <section id="view-admin-returned-goods" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Daftar Laporan Barang Retur Pembeli</h3>
+                            <button class="btn btn-primary btn-sm" id="btn-open-returned-modal">
+                                <i class="fa-solid fa-plus"></i> Laporkan Barang Retur
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Retur</th>
+                                        <th>Alasan Retur</th>
+                                        <th>Pelapor</th>
+                                        <th>Status Barang Retur</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-returned-goods-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN UPAH PEKERJA -->
+                <section id="view-admin-wages" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Ringkasan Pendapatan & Upah Pekerja Gudang</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nama Pekerja</th>
+                                        <th>Total Pekerjaan</th>
+                                        <th>Upah Hari Ini</th>
+                                        <th>Upah Minggu Ini</th>
+                                        <th>Upah Bulan Ini</th>
+                                        <th>Belum Dibayar</th>
+                                        <th>Sudah Dibayar</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-wages-summary">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN PENGAJUAN PENCAIRAN UPAH -->
+                <section id="view-admin-payouts" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Daftar Pengajuan Pencairan Upah Worker</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu Pengajuan</th>
+                                        <th>Nama Worker</th>
+                                        <th>Nominal Pencairan</th>
+                                        <th>Metode Pembayaran</th>
+                                        <th>No Rekening / E-Wallet</th>
+                                        <th>Catatan</th>
+                                        <th>Status Pengajuan</th>
+                                        <th class="text-right">Aksi Persetujuan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-admin-payouts-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN LAPORAN & STATISTIK -->
+                <section id="view-admin-reports" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 20px; margin-bottom: 20px;">
+                        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Pilih Jenis Laporan Gudang</h3>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                            <select id="report-type-select" class="form-control" style="width: auto;">
+                                <option value="stock">Laporan Stok Barang</option>
+                                <option value="stock_in">Laporan Barang Masuk</option>
+                                <option value="stock_out">Laporan Barang Keluar</option>
+                                <option value="sales">Laporan Barang Terjual (Closing)</option>
+                                <option value="booking">Laporan Booking Seller</option>
+                                <option value="damaged">Laporan Barang Cacat</option>
+                                <option value="returned">Laporan Barang Retur</option>
+                                <option value="work">Laporan Pekerjaan Gudang</option>
+                                <option value="wages">Laporan Upah Pekerja</option>
+                                <option value="payouts">Laporan Pencairan Upah</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" id="btn-generate-report">
+                                <i class="fa-solid fa-arrows-rotate"></i> Tampilkan Laporan
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btn-export-excel">
+                                <i class="fa-solid fa-file-excel text-success"></i> Ekspor Excel/CSV
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btn-print-report">
+                                <i class="fa-solid fa-print"></i> Cetak Laporan (PDF)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="card-table-wrapper" id="report-result-card">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;" id="report-title">Hasil Laporan</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table" id="report-data-table">
+                                <thead id="report-table-head">
+                                    <!-- Dynamic Head -->
+                                </thead>
+                                <tbody id="report-table-body">
+                                    <!-- Dynamic Body -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN MANAJEMEN PENGGUNA -->
+                <section id="view-admin-users" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Manajemen Akun System & Hak Akses</h3>
+                            <button class="btn btn-primary btn-sm" id="btn-open-user-modal">
+                                <i class="fa-solid fa-user-plus"></i> Tambah Akun Pengguna
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nama Lengkap</th>
+                                        <th>Username</th>
+                                        <th>Role Akses</th>
+                                        <th>Email / No Telp</th>
+                                        <th>Status Akun</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-users-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN LOG AKTIVITAS -->
+                <section id="view-admin-activity-logs" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Log Aktivitas & Audit Trail System</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu</th>
+                                        <th>Pengguna</th>
+                                        <th>Role</th>
+                                        <th>Aksi</th>
+                                        <th>Detail Informasi</th>
+                                        <th>IP Address</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-activity-logs-list">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN PENGATURAN -->
+                <section id="view-admin-settings" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 700px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Pengaturan Aplikasi GUDANG BAT</h3>
+                        <form id="form-settings">
+                            <div class="form-group">
+                                <label class="form-label">Nama Aplikasi Web</label>
+                                <input type="text" id="setting-app-name" class="form-control" value="GUDANG BAT">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Nama Gudang / Lokasi Cabang</label>
+                                <input type="text" id="setting-warehouse-name" class="form-control" value="Gudang Utama BAT Logistics - Jakarta">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Masa Berlaku Booking Seller (Hari)</label>
+                                <input type="number" id="setting-booking-expiry" class="form-control" value="3">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Stok Minimum Peringatan (Default)</label>
+                                <input type="number" id="setting-min-stock" class="form-control" value="10">
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa-solid fa-floppy-disk"></i> Simpan Pengaturan
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG WORKER DASHBOARD -->
+                <section id="view-gudang-dashboard" class="app-view hidden">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-bullseye"></i></div>
+                            <div class="stat-details">
+                                <h3 id="gudang-stat-today-target">0 Unit</h3>
+                                <p>Target Hari Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-circle-check"></i></div>
+                            <div class="stat-details">
+                                <h3 id="gudang-stat-today-done">0 Unit</h3>
+                                <p>Selesai Hari Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-wallet"></i></div>
+                            <div class="stat-details">
+                                <h3 id="gudang-stat-today-wage">Rp 0</h3>
+                                <p>Pendapatan Hari Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-clock"></i></div>
+                            <div class="stat-details">
+                                <h3 id="gudang-stat-unpaid">Rp 0</h3>
+                                <p>Upah Belum Dicairkan</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Target Pekerjaan Saya Hari Ini</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Jenis Pekerjaan</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Target</th>
+                                        <th>Tercapai</th>
+                                        <th>Progres</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-gudang-today-targets">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG TARGETS -->
+                <section id="view-gudang-targets" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Semua Target Pekerjaan Gudang</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>Jenis Pekerjaan</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Target</th>
+                                        <th>Sudah Selesai</th>
+                                        <th>Status Target</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-gudang-all-targets">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG WORK REPORT FORM & HISTORY -->
+                <section id="view-gudang-work-report" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 650px; margin-bottom: 24px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Form Laporan Hasil Pekerjaan Gudang</h3>
+                        <form id="form-gudang-work-report">
+                            <div class="form-group">
+                                <label class="form-label">Jenis Pekerjaan</label>
+                                <select id="wrk-work-type-id" class="form-control" required>
+                                    <option value="">-- Pilih Jenis Pekerjaan --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Produk</label>
+                                <select id="wrk-product-id" class="form-control" required>
+                                    <option value="">-- Pilih Produk --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Varian Produk</label>
+                                <select id="wrk-variant-id" class="form-control" required>
+                                    <option value="">-- Pilih Varian --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Jumlah Barang (Unit)</label>
+                                <input type="number" id="wrk-qty" class="form-control" min="1" placeholder="Masukkan jumlah barang" required>
+                            </div>
+                            <div class="wage-preview-card" style="padding:16px; border:1px dashed var(--primary); border-radius:10px; margin:12px 0 18px; background:rgba(59,130,246,.06);">
+                                <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                                    <div><small>Nominal Upah per Unit</small><div id="wrk-rate-preview" style="font-weight:800; font-size:18px; color:var(--primary);">Rp 0</div></div>
+                                    <div><small>Estimasi Upah Pekerjaan Ini</small><div id="wrk-total-wage-preview" style="font-weight:800; font-size:18px; color:var(--success);">Rp 0</div></div>
+                                </div>
+                                <small class="text-muted">Nominal ditentukan oleh Admin berdasarkan jenis pekerjaan dan otomatis tersimpan pada laporan.</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Kondisi Hasil Pekerjaan</label>
+                                <select id="wrk-condition" class="form-control" required>
+                                    <option value="Lolos">Lolos Quality Control (Bagus)</option>
+                                    <option value="Perlu diperbaiki">Perlu diperbaiki (Minor)</option>
+                                    <option value="Cacat">Cacat (Major)</option>
+                                    <option value="Retur">Retur Pembeli</option>
+                                    <option value="Tidak layak jual">Tidak Layak Jual</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Catatan Tambahan</label>
+                                <textarea id="wrk-note" class="form-control" rows="2" placeholder="Catatan hasil pengujian / pengerjaan..."></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-success">
+                                <i class="fa-solid fa-paper-plane"></i> Kirim Laporan Pekerjaan
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG WORK HISTORY -->
+                <section id="view-gudang-work-history" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Pekerjaan Saya</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu Input</th>
+                                        <th>Jenis Pekerjaan</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Kondisi</th>
+                                        <th>Tarif/Unit</th>
+                                        <th>Total Upah</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-gudang-history">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG EARNINGS & PAYOUT -->
+                <section id="view-gudang-earnings" class="app-view hidden">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-calendar-day"></i></div>
+                            <div class="stat-details">
+                                <h3 id="earn-today">Rp 0</h3>
+                                <p>Pendapatan Hari Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-blue"><i class="fa-solid fa-calendar-week"></i></div>
+                            <div class="stat-details">
+                                <h3 id="earn-week">Rp 0</h3>
+                                <p>Pendapatan Minggu Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-purple"><i class="fa-solid fa-calendar-days"></i></div>
+                            <div class="stat-details">
+                                <h3 id="earn-month">Rp 0</h3>
+                                <p>Pendapatan Bulan Ini</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-money-bill-transfer"></i></div>
+                            <div class="stat-details">
+                                <h3 id="earn-unpaid">Rp 0</h3>
+                                <p>Saldo Siap Dicairkan</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG PAYOUT REQUEST -->
+                <section id="view-gudang-payout-request" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 600px; margin-bottom: 24px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Form Ajukan Pencairan Upah</h3>
+                        <form id="form-payout-request">
+                            <div class="form-group">
+                                <label class="form-label">Nominal Pencairan (Rp)</label>
+                                <input type="number" id="payout-amount" class="form-control" placeholder="Masukkan jumlah upah yang akan dicairkan" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Metode Pembayaran</label>
+                                <select id="payout-method" class="form-control" required>
+                                    <option value="Transfer BCA">Transfer Bank BCA</option>
+                                    <option value="Transfer Mandiri">Transfer Bank Mandiri</option>
+                                    <option value="Transfer BRI">Transfer Bank BRI</option>
+                                    <option value="E-Wallet GoPay">E-Wallet GoPay</option>
+                                    <option value="E-Wallet OVO/DANA">E-Wallet OVO / DANA</option>
+                                    <option value="Tunai">Tunai Kasir Gudang</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Nomor Rekening / E-Wallet & Atas Nama</label>
+                                <input type="text" id="payout-account" class="form-control" placeholder="Contoh: 8830129481 a/n Agus Hermawan" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Catatan Tambahan</label>
+                                <textarea id="payout-note" class="form-control" rows="2" placeholder="Catatan untuk kasir admin..."></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa-solid fa-paper-plane"></i> Ajukan Pencairan
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Pengajuan Pencairan Saya</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu Pengajuan</th>
+                                        <th>Nominal</th>
+                                        <th>Metode</th>
+                                        <th>No Rekening</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-gudang-payout-history">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW GUDANG PROFILE -->
+                <section id="view-gudang-profile" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 600px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Profil Pekerja Gudang</h3>
+                        <p><strong>Nama:</strong> <span id="prof-gudang-name">Agus Hermawan</span></p>
+                        <p style="margin-top: 6px;"><strong>Role:</strong> Worker Gudang</p>
+                        <p style="margin-top: 6px;"><strong>Username:</strong> <span id="prof-gudang-user">gudang</span></p>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER DASHBOARD -->
+                <section id="view-seller-dashboard" class="app-view hidden">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon icon-green"><i class="fa-solid fa-boxes-stacked"></i></div>
+                            <div class="stat-details">
+                                <h3 id="seller-stat-available">0 Unit</h3>
+                                <p>Stok Tersedia Gudang</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-purple"><i class="fa-solid fa-bookmark"></i></div>
+                            <div class="stat-details">
+                                <h3 id="seller-stat-active-booking">0</h3>
+                                <p>Booking Aktif Saya</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon icon-amber"><i class="fa-solid fa-clock"></i></div>
+                            <div class="stat-details">
+                                <h3 id="seller-stat-pending-booking">0</h3>
+                                <p>Menunggu Persetujuan</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Booking Stok Aktif Saya</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>No Booking</th>
+                                        <th>Tanggal</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Masa Berlaku</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-seller-active-bookings">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER STOCK CATALOG -->
+                <section id="view-seller-stock-view" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Katalog Stok Gudang Siap Booking</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Produk & Varian</th>
+                                        <th>SKU</th>
+                                        <th>Stok Tersedia</th>
+                                        <th>Lokasi Rak Gudang</th>
+                                        <th class="text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-seller-stock-catalog">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER BOOKING FORM -->
+                <section id="view-seller-booking-form" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 600px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Form Booking Stok Barang Baru</h3>
+                        <form id="form-seller-booking">
+                            <div class="form-group">
+                                <label class="form-label">Pilih Produk</label>
+                                <select id="bkg-product-id" class="form-control" required>
+                                    <option value="">-- Pilih Produk --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Pilih Varian Produk</label>
+                                <select id="bkg-variant-id" class="form-control" required>
+                                    <option value="">-- Pilih Varian --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Jumlah Yang Ingin Dibooking</label>
+                                <input type="number" id="bkg-qty" class="form-control" min="1" placeholder="Masukkan jumlah unit" required>
+                                <small id="bkg-stock-warning" class="text-danger hidden" style="font-weight: 600; margin-top: 4px; display: block;">
+                                    ⚠️ Stok tersedia tidak mencukupi untuk jumlah booking yang diminta!
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Catatan / Keperluan Event</label>
+                                <textarea id="bkg-note" class="form-control" rows="2" placeholder="Contoh: Booking event promo toko online 8.8..."></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-purple" id="btn-submit-booking" style="background: var(--purple); color: #fff;">
+                                <i class="fa-solid fa-bookmark"></i> Buat Booking Stok Now
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER BOOKING HISTORY -->
+                <section id="view-seller-booking-history" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Riwayat Semua Booking Seller</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>No Booking</th>
+                                        <th>Waktu Booking</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah</th>
+                                        <th>Masa Berlaku</th>
+                                        <th>Status Booking</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-seller-booking-history">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER SALES STATUS -->
+                <section id="view-seller-sales-status" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">Status Penjualan & Closing Resi Saya</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>No Transaksi</th>
+                                        <th>No Resi Pengiriman</th>
+                                        <th>Tanggal Closing</th>
+                                        <th>Produk & Varian</th>
+                                        <th>Jumlah Terjual</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-seller-sales-history">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW SELLER PROFILE -->
+                <section id="view-seller-profile" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 600px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Profil Seller</h3>
+                        <p><strong>Nama Toko:</strong> <span id="prof-seller-name">Toko Online Jaya</span></p>
+                        <p style="margin-top: 6px;"><strong>Role:</strong> Seller Resmi</p>
+                        <p style="margin-top: 6px;"><strong>Username:</strong> <span id="prof-seller-user">seller</span></p>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ==========================================================================
+         3. MODALS FORM & SIMULATORS
+         ========================================================================== -->
+    <!-- MODAL TAMBAH/EDIT PRODUK -->
+    <div class="modal-backdrop" id="modal-product">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-product-title">Tambah Produk Baru</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-modal-product">
+                    <input type="hidden" id="prd-id">
+                    <div class="form-group">
+                        <label class="form-label">Nama Produk</label>
+                        <input type="text" id="prd-name" class="form-control" placeholder="Contoh: Dongkrak Botol BAT" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Kategori Produk</label>
+                        <select id="prd-category-id" class="form-control" required>
+                            <!-- Dynamic -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">SKU Produk (Kode Utama)</label>
+                        <input type="text" id="prd-sku" class="form-control" placeholder="Contoh: DNK-BTL-BAT" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Satuan Produk</label>
+                        <input type="text" id="prd-unit" class="form-control" placeholder="Contoh: Unit, Pcs, Set" value="Unit" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Lokasi Gudang / Rak Storage</label>
+                        <input type="text" id="prd-location" class="form-control" placeholder="Contoh: Rak A-01">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Stok Minimum Alert</label>
+                        <input type="number" id="prd-min-stock" class="form-control" value="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Deskripsi Produk</label>
+                        <textarea id="prd-description" class="form-control" rows="2"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Varian Produk (Pisahkan dengan koma)</label>
+                        <input type="text" id="prd-variants-input" class="form-control" placeholder="Contoh: 2 Ton, 3 Ton, 5 Ton, 10 Ton">
+                        <small style="color: var(--text-muted);">Admin dapat membuat varian dinamis baru kapan saja.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-product">Simpan Produk</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL BARANG MASUK -->
+    <div class="modal-backdrop" id="modal-stock-in">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Penerimaan Barang Masuk (Stok Masuk)</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-stock-in">
+                    <div class="form-group">
+                        <label class="form-label">Pilih Produk</label>
+                        <select id="in-product-id" class="form-control" required>
+                            <option value="">-- Pilih Produk --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Pilih Varian</label>
+                        <select id="in-variant-id" class="form-control" required>
+                            <option value="">-- Pilih Varian --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jumlah Barang Masuk</label>
+                        <input type="number" id="in-qty" class="form-control" min="1" placeholder="Masukkan jumlah" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Supplier / Sumber Barang</label>
+                        <input type="text" id="in-supplier" class="form-control" placeholder="Contoh: PT Heavy Heavy Industry" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nomor Dokumen / Surat Jalan</label>
+                        <input type="text" id="in-doc-no" class="form-control" placeholder="Contoh: SJ-2026-089" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Catatan Penerimaan</label>
+                        <textarea id="in-note" class="form-control" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-stock-in">Simpan Stok Masuk</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL BARANG KELUAR -->
+    <div class="modal-backdrop" id="modal-stock-out">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Pengeluaran Barang (Non-Penjualan)</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-stock-out">
+                    <div class="form-group">
+                        <label class="form-label">Pilih Produk</label>
+                        <select id="out-product-id" class="form-control" required>
+                            <option value="">-- Pilih Produk --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Pilih Varian</label>
+                        <select id="out-variant-id" class="form-control" required>
+                            <option value="">-- Pilih Varian --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jumlah Keluar</label>
+                        <input type="number" id="out-qty" class="form-control" min="1" placeholder="Masukkan jumlah unit" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Tujuan Pengeluaran</label>
+                        <input type="text" id="out-destination" class="form-control" placeholder="Contoh: Cabang Surabaya / Sample QC" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Alasan Pengeluaran</label>
+                        <input type="text" id="out-reason" class="form-control" placeholder="Contoh: Mutasi Antar Gudang / Uji Beban" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Catatan Pengeluaran</label>
+                        <textarea id="out-note" class="form-control" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-stock-out">Simpan Barang Keluar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL KELOLA KATEGORI -->
+    <div class="modal-backdrop" id="modal-category">
+        <div class="modal-card" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Kelola Kategori Produk</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-modal-category">
+                    <div class="form-group">
+                        <label class="form-label">Nama Kategori Baru</label>
+                        <input type="text" id="cat-name" class="form-control" placeholder="Contoh: Kunci Pas, Mesin Las, dll." required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Deskripsi Kategori</label>
+                        <textarea id="cat-desc" class="form-control" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-category">Tambah Kategori</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL JENIS PEKERJAAN GUDANG -->
+    <div class="modal-backdrop" id="modal-work-type">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Kelola Jenis Pekerjaan Gudang & Tarif Upah</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-work-type">
+                    <input type="hidden" id="wt-id">
+                    <div class="form-group">
+                        <label class="form-label">Nama Jenis Pekerjaan</label>
+                        <input type="text" id="wt-name" class="form-control" placeholder="Contoh: Repacking Dus, Labeling Stiker, Checking" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nominal Upah yang Diterima Pekerja per Unit (Rp)</label>
+                        <input type="number" id="wt-rate" class="form-control" placeholder="Contoh: 1500" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Keterangan Pekerjaan</label>
+                        <textarea id="wt-desc" class="form-control" rows="2" placeholder="Deskripsi instruksi pengerjaan..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-work-type">Simpan Jenis Pekerjaan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TARGET PEKERJAAN HARIAN -->
+    <div class="modal-backdrop" id="modal-work-target">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Buat Target Pekerjaan Harian Worker</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-work-target">
+                    <div class="form-group">
+                        <label class="form-label">Pekerja Gudang (Worker)</label>
+                        <select id="tgt-worker-id" class="form-control" required>
+                            <!-- Dynamic -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jenis Pekerjaan</label>
+                        <select id="tgt-work-type-id" class="form-control" required>
+                            <!-- Dynamic -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Produk & Varian Target</label>
+                        <select id="tgt-product-id" class="form-control" required>
+                            <!-- Dynamic -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Varian Target</label>
+                        <select id="tgt-variant-id" class="form-control" required>
+                            <!-- Dynamic -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jumlah Target Unit</label>
+                        <input type="number" id="tgt-qty" class="form-control" min="1" placeholder="Contoh: 50" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-success" id="btn-save-work-target">Tugaskan Target</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LAPOR BARANG CACAT -->
+    <div class="modal-backdrop" id="modal-damaged">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Laporan Barang Cacat Gudang</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-damaged">
+                    <div class="form-group">
+                        <label class="form-label">Pilih Produk</label>
+                        <select id="dmg-product-id" class="form-control" required>
+                            <option value="">-- Pilih Produk --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Pilih Varian</label>
+                        <select id="dmg-variant-id" class="form-control" required>
+                            <option value="">-- Pilih Varian --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jumlah Barang Cacat</label>
+                        <input type="number" id="dmg-qty" class="form-control" min="1" placeholder="Masukkan jumlah unit" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Alasan & Kerusakan</label>
+                        <textarea id="dmg-reason" class="form-control" rows="2" placeholder="Detail bagian yang cacat atau rusak..." required></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-danger" id="btn-save-damaged">Kirim Laporan Cacat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LAPOR BARANG RETUR -->
+    <div class="modal-backdrop" id="modal-returned">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Laporan Barang Retur Pembeli</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-returned">
+                    <div class="form-group">
+                        <label class="form-label">Pilih Produk</label>
+                        <select id="ret-product-id" class="form-control" required>
+                            <option value="">-- Pilih Produk --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Pilih Varian</label>
+                        <select id="ret-variant-id" class="form-control" required>
+                            <option value="">-- Pilih Varian --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Jumlah Barang Retur</label>
+                        <input type="number" id="ret-qty" class="form-control" min="1" placeholder="Masukkan jumlah unit" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Alasan Pengembalian</label>
+                        <textarea id="ret-reason" class="form-control" rows="2" placeholder="Alasan retur dari pembeli..." required></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-warning" id="btn-save-returned">Simpan Laporan Retur</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PENGGUNA BARU -->
+    <div class="modal-backdrop" id="modal-user">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Tambah Akun Pengguna System</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-user">
+                    <div class="form-group">
+                        <label class="form-label">Nama Lengkap</label>
+                        <input type="text" id="usr-name" class="form-control" placeholder="Nama pengguna" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Username Login</label>
+                        <input type="text" id="usr-username" class="form-control" placeholder="Username" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" id="usr-password" class="form-control" placeholder="Password akun" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Role Akses</label>
+                        <select id="usr-role" class="form-control" required>
+                            <option value="admin">Admin Utama</option>
+                            <option value="gudang">Pekerja Gudang</option>
+                            <option value="seller">Seller / Penjual</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email</label>
+                        <input type="email" id="usr-email" class="form-control" placeholder="email@gudangbat.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">No Telepon / WhatsApp</label>
+                        <input type="text" id="usr-phone" class="form-control" placeholder="0812...">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-user">Simpan Akun Pengguna</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL SCAN RESI BARCODE SIMULATOR -->
+    <div class="modal-backdrop" id="modal-barcode-scanner">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Scan Barcode Resi Pengiriman</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body text-center">
+                <div style="width: 100%; height: 220px; background: #000; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; margin-bottom: 20px;">
+                    <i class="fa-solid fa-camera" style="font-size: 48px; color: rgba(255,255,255,0.4);"></i>
+                    <div style="position: absolute; width: 80%; height: 2px; background: #ef4444; box-shadow: 0 0 10px #ef4444; animation: scanLine 2s linear infinite;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Input Manual / Hasil Barcode Scanner</label>
+                    <input type="text" id="simulated-barcode-input" class="form-control" placeholder="Arahkan scanner atau ketik resi (cth: JX-88391204-ID)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-submit-scanned-barcode">Gunakan Resi Ini</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMATION DIALOG -->
+    <div class="modal-backdrop" id="modal-confirm">
+        <div class="modal-card" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3 id="confirm-title">Konfirmasi Aksi</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body text-center">
+                <i class="fa-solid fa-triangle-exclamation" style="font-size: 48px; color: var(--warning); margin-bottom: 16px;"></i>
+                <p id="confirm-message" style="font-size: 14.5px; color: var(--text-main); font-weight: 500;">
+                    Apakah Anda yakin ingin melakukan proses ini?
+                </p>
+            </div>
+            <div class="modal-footer" style="justify-content: center;">
+                <button class="btn btn-secondary modal-close" id="btn-confirm-cancel">Batal</button>
+                <button class="btn btn-danger" id="btn-confirm-proceed">Ya, Lanjutkan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
