@@ -188,11 +188,15 @@ async function persistAppState(logAction = null, logDetails = "") {
     if (result && result.success === false) throw new Error(result.message || 'Penyimpanan gagal.');
   }).catch(err => {
     console.error('Gagal menyimpan ke database server:', err);
-    showToast('Data belum tersimpan ke server. Periksa koneksi backend.', 'danger');
+    const message = err?.message || 'Data belum tersimpan ke server. Periksa koneksi backend.';
+    showToast(message, 'danger');
+    return false;
   }).finally(() => { saveInProgress = false; });
 
-  await saveQueue;
+  const saved = await saveQueue;
+  if (saved === false) return false;
   refreshCurrentView();
+  return true;
 }
 
 // ==========================================================================
@@ -600,9 +604,8 @@ function initEventListeners() {
   const btnLogout = document.getElementById('btn-logout');
   if (btnLogout) {
     btnLogout.addEventListener('click', () => {
-      if (currentUser) {
-        persistAppState("LOGOUT", `Pengguna ${currentUser.name} keluar dari sistem.`);
-      }
+      // Logout hanya mengakhiri sesi. Semua perubahan data harus sudah
+      // disimpan saat aksi Tambah/Edit/Hapus/ACC/Tolak dilakukan.
       currentUser = null;
       sessionStorage.removeItem('gudangbat_user');
       sessionStorage.removeItem('gudangbat_token');
