@@ -50,6 +50,15 @@ function getAuthHeaders(extra = {}) {
   return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
+
+async function apiRequest(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: getAuthHeaders(options.headers || {}) });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (!res.ok || data?.success === false) throw new Error(data?.message || `Permintaan gagal (${res.status}).`);
+  return data;
+}
+
 function ensureStateShape() {
   const defaults = {
     settings: { appName: 'GUDANG BAT', warehouseName: 'Gudang BAT', bookingExpiryDays: 3, minStockDefault: 10 },
@@ -1948,23 +1957,25 @@ function initModalActions() {
     });
   }
 
-  // Save Product (Tambah / Edit)
+  // Save Product (Tambah / Edit) - langsung ke endpoint CRUD
   const btnSaveProduct = document.getElementById('btn-save-product');
-  if (btnSaveProduct) btnSaveProduct.addEventListener('click', () => {
+  if (btnSaveProduct) btnSaveProduct.addEventListener('click', async () => {
     const id = document.getElementById('prd-id').value.trim();
-    const name = document.getElementById('prd-name').value.trim(); const catId = document.getElementById('prd-category-id').value;
+    const name = document.getElementById('prd-name').value.trim(); const categoryId = document.getElementById('prd-category-id').value;
     const sku = document.getElementById('prd-sku').value.trim(); const unit = document.getElementById('prd-unit').value.trim() || 'Unit';
-    const location = document.getElementById('prd-location').value.trim(); const minStock = parseInt(document.getElementById('prd-min-stock').value) || 10;
-    const desc = document.getElementById('prd-description').value.trim(); const varStr = document.getElementById('prd-variants-input').value.trim();
-    if (!name || !sku || !catId) return showToast('Nama produk, kategori dan SKU wajib diisi!', 'warning');
-    if ((appState.products||[]).some(p => p.id !== id && String(p.sku).toLowerCase() === sku.toLowerCase())) return showToast('SKU produk sudah digunakan.', 'warning');
-    const existing=(appState.products||[]).find(p=>p.id===id); const now=new Date().toISOString();
+    const warehouseLocation = document.getElementById('prd-location').value.trim(); const minStock = parseInt(document.getElementById('prd-min-stock').value) || 10;
+    const description = document.getElementById('prd-description').value.trim(); const varStr = document.getElementById('prd-variants-input').value.trim();
+    if (!name || !sku || !categoryId) return showToast('Nama produk, kategori dan SKU wajib diisi!', 'warning');
+    const existing=(appState.products||[]).find(p=>p.id===id);
     const names=varStr ? varStr.split(',').map(x=>x.trim()).filter(Boolean) : ['Standard'];
-    const variants=names.map((n,i)=> existing?.variants?.find(v=>v.name===n) || {id:'VAR-'+Date.now()+'-'+i,name:n,sku:`${sku}-${i+1}`});
-    const obj={...(existing||{}),id:id||'PRD-'+Date.now(),categoryId:catId,name,sku,description:desc,unit,warehouseLocation:location||'Rak Gudang Utama',minStock,status:existing?.status||'active',imageUrl:existing?.imageUrl||'',variants,updatedAt:now,createdAt:existing?.createdAt||now};
-    if(existing) Object.assign(existing,obj); else (appState.products||(appState.products=[])).push(obj);
-    (appState.inventory||(appState.inventory=[])); variants.forEach(v=>{if(!getInventory(obj.id,v.id)) appState.inventory.push({productId:obj.id,variantId:v.id,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0});});
-    document.getElementById('modal-product')?.classList.remove('active'); persistAppState(existing?'EDIT_PRODUK':'TAMBAH_PRODUK', `${existing?'Memperbarui':'Menambahkan'} produk ${name}`); showToast(`Produk ${name} berhasil disimpan!`,'success');
+    const variants=names.map((n,i)=>{const old=existing?.variants?.find(v=>v.name===n);return {id:old?.id,name:n,sku:old?.sku||`${sku}-${i+1}`};});
+    const payload={name,categoryId,sku,description,unit,warehouseLocation,minStock,variants};
+    const original=btnSaveProduct.innerHTML; btnSaveProduct.disabled=true; btnSaveProduct.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+    try {
+      await apiRequest(id?`/api/products/${encodeURIComponent(id)}`:'/api/products',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      await syncFetchState(true); refreshCurrentView(); document.getElementById('modal-product')?.classList.remove('active'); showToast(`Produk ${name} berhasil ${id?'diperbarui':'ditambahkan'}!`,'success');
+    } catch(err) { showToast(err.message||'Produk gagal disimpan.','danger'); }
+    finally { btnSaveProduct.disabled=false; btnSaveProduct.innerHTML=original; }
   });
 
   // Category Modal
@@ -1977,32 +1988,17 @@ function initModalActions() {
   }
 
   const btnSaveCategory = document.getElementById('btn-save-category');
-  if (btnSaveCategory) {
-    btnSaveCategory.addEventListener('click', () => {
-      const name = document.getElementById('cat-name').value.trim();
-      const desc = document.getElementById('cat-desc').value.trim();
-
-      if (!name) {
-        showToast("Nama kategori wajib diisi!", "warning");
-        return;
-      }
-
-      const newCat = {
-        id: "CAT-" + Date.now(),
-        name: name,
-        description: desc,
-        createdAt: new Date().toISOString()
-      };
-
-      if (!appState.categories) appState.categories = [];
-      appState.categories.push(newCat);
-
-      const modal = document.getElementById('modal-category');
-      if (modal) modal.classList.remove('active');
-      persistAppState("TAMBAH_KATEGORI", `Menambahkan kategori produk baru: ${name}`);
-      showToast(`Kategori ${name} berhasil ditambahkan!`, "success");
-    });
-  }
+  if (btnSaveCategory) btnSaveCategory.addEventListener('click', async () => {
+    const name = document.getElementById('cat-name').value.trim();
+    const description = document.getElementById('cat-desc').value.trim();
+    if (!name) return showToast('Nama kategori wajib diisi!', 'warning');
+    const original=btnSaveCategory.innerHTML; btnSaveCategory.disabled=true;
+    try {
+      await apiRequest('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description})});
+      await syncFetchState(true); refreshCurrentView(); document.getElementById('modal-category')?.classList.remove('active'); showToast(`Kategori ${name} berhasil ditambahkan!`, 'success');
+    } catch(err){ showToast(err.message||'Kategori gagal ditambahkan.','danger'); }
+    finally { btnSaveCategory.disabled=false; btnSaveCategory.innerHTML=original; }
+  });
 
   // Stock In Modal
   const btnOpenStockIn = document.getElementById('btn-open-stock-in-modal');
@@ -2657,7 +2653,7 @@ function editProduct(id){
   const sel=document.getElementById('prd-category-id'); sel.innerHTML=(appState.categories||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); sel.value=p.categoryId||'';
   document.getElementById('modal-product-title').innerText='Edit Produk'; document.getElementById('modal-product').classList.add('active');
 }
-function confirmDeleteProduct(id){ const p=(appState.products||[]).find(x=>x.id===id); if(!p)return; showConfirmDialog('Hapus Produk',`Hapus <strong>${p.name}</strong> beserta data variannya? Data booking/riwayat lama tetap disimpan sebagai arsip.`,()=>{appState.products=appState.products.filter(x=>x.id!==id); appState.inventory=appState.inventory.filter(x=>x.productId!==id); persistAppState('HAPUS_PRODUK',`Menghapus produk ${p.name}`); showToast('Produk berhasil dihapus.','success');}); }
+function confirmDeleteProduct(id){ const p=(appState.products||[]).find(x=>x.id===id); if(!p)return; showConfirmDialog('Hapus Produk',`Hapus <strong>${p.name}</strong> beserta data variannya? Data booking/riwayat lama tetap disimpan sebagai arsip.`,async()=>{try{await apiRequest(`/api/products/${encodeURIComponent(id)}`,{method:'DELETE'});await syncFetchState(true);refreshCurrentView();showToast('Produk berhasil dihapus.','success');}catch(err){showToast(err.message||'Produk gagal dihapus.','danger');}}); }
 function editUser(id){ const u=(appState.users||[]).find(x=>x.id===id); if(!u)return; document.getElementById('usr-id').value=u.id; document.getElementById('usr-name').value=u.name||''; document.getElementById('usr-username').value=u.username||''; document.getElementById('usr-password').value=''; document.getElementById('usr-role').value=u.role||'gudang'; document.getElementById('usr-email').value=u.email||''; document.getElementById('usr-phone').value=u.phone||''; document.getElementById('modal-user-title').innerText='Edit Akun Pengguna'; document.getElementById('modal-user').classList.add('active'); }
 
 function openDashboardBookings(){ switchView('admin-seller-bookings'); document.querySelector('.nav-link[data-view="admin-seller-bookings"]')?.classList.add('active'); }
