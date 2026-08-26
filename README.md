@@ -33,3 +33,12 @@ Frontend lama masih dipertahankan agar tampilan dan fitur yang sudah dibuat tida
 ## Deployment
 
 Untuk Railway: buat Project -> PostgreSQL -> Deploy from GitHub -> isi `JWT_SECRET`. Railway menyediakan `DATABASE_URL` dari PostgreSQL. Setelah service hidup, pasang Custom Domain.
+
+
+## Upgrade fitur
+- Sidebar mobile kini memiliki overlay dan otomatis menutup setelah menu dipilih.
+- Dashboard admin bertingkat: Kategori → Produk/Varian → laporan stok.
+- Profil admin, pekerja, dan seller dapat mengubah foto serta informasi akun.
+- Tombol edit/hapus produk dan edit pengguna diperbaiki.
+- Scanner resi mendukung kamera browser (BarcodeDetector bila tersedia) dengan fallback input manual.
+- Dashboard menyediakan akses cepat Booking, Pengajuan Upah, Scan Resi, dan grafik statistik.
