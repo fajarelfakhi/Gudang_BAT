@@ -1,2 +1,0 @@
--- Skema utama dibuat otomatis oleh server.js saat bootstrap.
--- Data aplikasi lama dimigrasikan dari database/seed.json ke PostgreSQL.
