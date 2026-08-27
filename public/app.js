@@ -125,13 +125,21 @@ document.addEventListener('DOMContentLoaded', () => {
     checkSavedSession();
   });
 
-  // Sinkronisasi data berkala. Tidak menimpa data ketika proses simpan masih berjalan.
+  // Sinkronisasi multi-device: cek versi ringan terlebih dahulu, lalu unduh state hanya bila berubah.
   setInterval(async () => {
-    if (currentUser && !saveInProgress) {
-      if (expireSellerBookings()) await persistAppState('BOOKING_KEDALUWARSA', 'Sistem otomatis melepas booking yang kedaluwarsa.');
-      await syncFetchState(true);
+    if (currentUser && !saveInProgress && navigator.onLine) {
+      try {
+        const r = await fetch(`${API_BASE}/sync/version`, { headers: getAuthHeaders() });
+        if (r.ok) {
+          const v = await r.json();
+          if (Number(v.version || 0) !== Number(stateVersion || 0)) await syncFetchState(true);
+        }
+      } catch (_) { /* koneksi sementara putus, coba lagi pada siklus berikutnya */ }
     }
   }, 10000);
+
+  window.addEventListener('online', () => { if (currentUser && !saveInProgress) syncFetchState(true); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && currentUser && !saveInProgress) syncFetchState(true); });
 });
 
 async function loadAppState() {
@@ -428,59 +436,16 @@ function updateWorkVariantOptions() {
 
 async function submitGudangWorkReport(event) {
   event.preventDefault();
-  if (!currentUser || currentUser.role !== 'gudang') {
-    showToast('Hanya akun Gudang yang dapat mengirim laporan pekerjaan.', 'danger');
-    return;
-  }
-
-  const workTypeId = document.getElementById('wrk-work-type-id')?.value;
-  const productId = document.getElementById('wrk-product-id')?.value;
-  const variantId = document.getElementById('wrk-variant-id')?.value;
-  const qty = Number(document.getElementById('wrk-qty')?.value || 0);
-  const condition = document.getElementById('wrk-condition')?.value || 'Lolos';
-  const note = document.getElementById('wrk-note')?.value.trim() || '';
-  const workType = getWorkTypeById(workTypeId);
-  const product = (appState.products || []).find(p => p.id === productId);
-  const variant = (product?.variants || []).find(v => v.id === variantId);
-  const ratePerUnit = getWorkRate(workTypeId);
-
-  if (!workType || !product || !variant || qty <= 0) {
-    showToast('Lengkapi jenis pekerjaan, produk, varian, dan jumlah pekerjaan.', 'warning');
-    return;
-  }
-  if (ratePerUnit <= 0) {
-    showToast('Tarif upah untuk jenis pekerjaan ini belum ditentukan admin.', 'warning');
-    return;
-  }
-
-  const report = {
-    id: `RPT-${Date.now()}`,
-    workerId: currentUser.id,
-    workerName: currentUser.name,
-    workTypeId,
-    workTypeName: workType.name,
-    productId,
-    productName: product.name,
-    variantId,
-    variantName: variant.name,
-    qty,
-    condition,
-    note,
-    ratePerUnit,
-    totalWage: ratePerUnit * qty,
-    createdAt: new Date().toISOString()
-  };
-
-  if (!appState.workReports) appState.workReports = [];
-  appState.workReports.unshift(report);
-
-  const form = document.getElementById('form-gudang-work-report');
-  if (form) form.reset();
-  updateWorkWagePreview();
-  await persistAppState('LAPORAN_PEKERJAAN', `${currentUser.name} melaporkan ${workType.name} sebanyak ${qty} unit. Upah: ${formatRupiah(report.totalWage)}.`);
-  showToast(`Laporan tersimpan. Upah yang diperoleh: ${formatRupiah(report.totalWage)}.`, 'success');
+  if (!currentUser || currentUser.role !== 'gudang') return showToast('Hanya akun Gudang yang dapat mengirim laporan pekerjaan.', 'danger');
+  const workTypeId=document.getElementById('wrk-work-type-id')?.value, productId=document.getElementById('wrk-product-id')?.value, variantId=document.getElementById('wrk-variant-id')?.value;
+  const qty=Number(document.getElementById('wrk-qty')?.value||0), condition=document.getElementById('wrk-condition')?.value||'Lolos', note=document.getElementById('wrk-note')?.value.trim()||'';
+  if(!workTypeId||!productId||!variantId||qty<=0) return showToast('Lengkapi jenis pekerjaan, produk, varian, dan jumlah pekerjaan.','warning');
+  try {
+    const res=await apiRequest('/api/work-reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workTypeId,productId,variantId,qty,condition,note,workerName:currentUser.name})});
+    await syncFetchState(true); document.getElementById('form-gudang-work-report')?.reset(); updateWorkWagePreview(); refreshCurrentView();
+    showToast(res.message||'Laporan pekerjaan berhasil disimpan.','success');
+  } catch(err){showToast(err.message||'Laporan pekerjaan gagal disimpan.','danger');}
 }
-
 
 function populateBookingForm() {
   const pSelect = document.getElementById('bkg-product-id');
@@ -529,49 +494,23 @@ async function submitSellerBooking(event) {
   const vId = document.getElementById('bkg-variant-id')?.value;
   const qty = Number(document.getElementById('bkg-qty')?.value || 0);
   const note = document.getElementById('bkg-note')?.value.trim() || '';
-  const product = (appState.products || []).find(p => p.id === pId);
-  const variant = (product?.variants || []).find(v => v.id === vId);
-  const inv = getInventory(pId, vId);
-  const available = getAvailableStock(inv);
-  if (!product || !variant || qty <= 0) return showToast('Pilih produk, varian, dan jumlah booking.', 'warning');
-  if (qty > available) return showToast(`Stok tidak mencukupi. Tersedia hanya ${available} unit.`, 'danger');
-
-  const now = new Date();
-  const expires = new Date(now.getTime() + Number(appState.settings.bookingExpiryDays || 3) * 86400000);
-  const booking = {
-    id: 'BKG-' + Date.now(), bookingNo: 'BKG-' + now.toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.floor(1000+Math.random()*9000),
-    sellerId: currentUser.id, sellerName: currentUser.name, productId: pId, productName: product.name,
-    variantId: vId, variantName: variant.name, qty, note, date: now.toISOString().slice(0,10),
-    status: 'Menunggu Persetujuan', createdAt: now.toISOString(), expiresAt: expires.toISOString()
-  };
-  appState.sellerBookings.unshift(booking);
-  // Stok langsung direservasi agar tidak dibooking berulang sebelum admin memeriksa.
-  inv.bookedStock = Number(inv.bookedStock || 0) + qty;
-  document.getElementById('form-seller-booking')?.reset();
-  await persistAppState('BUAT_BOOKING', `Seller ${currentUser.name} membuat booking ${booking.bookingNo} sebanyak ${qty} unit.`);
-  showToast(`Booking ${booking.bookingNo} berhasil dibuat dan menunggu persetujuan admin.`, 'success');
-  switchView('seller-booking-history');
+  if (!pId || !vId || qty <= 0) return showToast('Pilih produk, varian, dan jumlah booking.', 'warning');
+  const btn=document.getElementById('btn-submit-booking'); if(btn) btn.disabled=true;
+  try {
+    const res=await apiRequest('/api/bookings',{method:'POST',body:{productId:pId,variantId:vId,qty,note}});
+    await syncFetchState(true);
+    document.getElementById('form-seller-booking')?.reset();
+    showToast(res.message||'Booking berhasil dibuat dan stok direservasi.','success');
+    switchView('seller-booking-history');
+  } catch(err) { showToast(err.message||'Booking gagal disimpan.','danger'); } finally { if(btn) btn.disabled=false; }
 }
 
 async function submitPayoutRequest(event) {
   event.preventDefault();
   if (!currentUser || currentUser.role !== 'gudang') return showToast('Hanya akun Gudang yang dapat mengajukan pencairan.', 'danger');
-  const amount = Number(document.getElementById('payout-amount')?.value || 0);
-  const paymentMethod = document.getElementById('payout-method')?.value || '';
-  const accountNo = document.getElementById('payout-account')?.value.trim() || '';
-  const note = document.getElementById('payout-note')?.value.trim() || '';
-  const available = getWorkerAvailableWage(currentUser.id);
-  if (amount <= 0 || !paymentMethod || !accountNo) return showToast('Lengkapi nominal, metode pembayaran, dan tujuan pencairan.', 'warning');
-  if (amount > available) return showToast(`Nominal melebihi saldo yang dapat dicairkan (${formatRupiah(available)}).`, 'danger');
-  const payout = {
-    id: 'PAY-' + Date.now(), workerId: currentUser.id, workerName: currentUser.name, amount,
-    paymentMethod, accountNo, note, status: 'Menunggu Persetujuan', createdAt: new Date().toISOString()
-  };
-  appState.payoutRequests.unshift(payout);
-  document.getElementById('form-payout-request')?.reset();
-  await persistAppState('AJUKAN_PENCAIRAN', `${currentUser.name} mengajukan pencairan upah ${formatRupiah(amount)}.`);
-  showToast('Pengajuan pencairan berhasil dikirim ke Admin.', 'success');
-  renderGudangPayoutRequest();
+  const amount=Number(document.getElementById('payout-amount')?.value||0), paymentMethod=document.getElementById('payout-method')?.value||'', accountNo=document.getElementById('payout-account')?.value.trim()||'', note=document.getElementById('payout-note')?.value.trim()||'';
+  try {const res=await apiRequest('/api/wage-withdrawals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,paymentMethod,accountNo,note,workerName:currentUser.name})});await syncFetchState(true);document.getElementById('form-payout-request')?.reset();renderGudangPayoutRequest();showToast(res.message||'Pengajuan pencairan berhasil dikirim.','success');}
+  catch(err){showToast(err.message||'Pengajuan pencairan gagal disimpan.','danger');}
 }
 
 // ==========================================================================
@@ -1139,9 +1078,7 @@ function deleteWorkType(id) {
   const wt = getWorkTypeById(id);
   if (!wt) return;
   showConfirmDialog('Hapus Jenis Pekerjaan', `Hapus <strong>${wt.name}</strong>? Riwayat pekerjaan lama tidak akan dihapus.`, () => {
-    appState.workTypes = (appState.workTypes || []).filter(x => x.id !== id);
-    persistAppState('HAPUS_JENIS_PEKERJAAN', `Menghapus jenis pekerjaan ${wt.name}.`);
-    showToast('Jenis pekerjaan berhasil dihapus.', 'success');
+    (async()=>{try{const res=await apiRequest(`/api/work-types/${encodeURIComponent(id)}`,{method:'DELETE'});await syncFetchState(true);renderAdminWorkTypesList();showToast(res.message||'Jenis pekerjaan berhasil dihapus.','success');}catch(err){showToast(err.message||'Jenis pekerjaan gagal dihapus.','danger');}})();
   });
 }
 
@@ -1239,33 +1176,19 @@ function renderAdminPayouts() {
   });
 }
 
-function approvePayout(id) {
-  const p = (appState.payoutRequests || []).find(x => x.id === id);
-  if (p) {
-    p.status = 'Disetujui';
-    p.approvedBy = currentUser.name;
-    persistAppState("PERSETUJUAN_PENCAIRAN", `Menyetujui pengajuan pencairan upah ${p.workerName} sebesar Rp ${p.amount.toLocaleString('id-ID')}`);
-    showToast("Pengajuan pencairan disetujui!", "success");
-  }
+async function approvePayout(id) {
+  try { const res=await apiRequest(`/api/wage-withdrawals/${encodeURIComponent(id)}/approve`,{method:'PATCH'}); await syncFetchState(true); renderAdminPayouts(); renderAdminWages(); showToast(res.message||'Pengajuan pencairan disetujui!','success'); }
+  catch(err){ showToast(err.message||'Gagal memperbarui pengajuan.','danger'); }
 }
 
-function rejectPayout(id) {
-  const p = (appState.payoutRequests || []).find(x => x.id === id);
-  if (p) {
-    p.status = 'Ditolak';
-    persistAppState("PENOLAKAN_PENCAIRAN", `Menolak pengajuan pencairan upah ${p.workerName}`);
-    showToast("Pengajuan pencairan ditolak.", "danger");
-  }
+async function rejectPayout(id) {
+  try { const res=await apiRequest(`/api/wage-withdrawals/${encodeURIComponent(id)}/reject`,{method:'PATCH'}); await syncFetchState(true); renderAdminPayouts(); renderAdminWages(); showToast(res.message||'Pengajuan pencairan ditolak.','danger'); }
+  catch(err){ showToast(err.message||'Gagal memperbarui pengajuan.','danger'); }
 }
 
-function markPayoutPaid(id) {
-  const p = (appState.payoutRequests || []).find(x => x.id === id);
-  if (p) {
-    p.status = 'Sudah Dibayar';
-    p.paidAt = new Date().toISOString();
-    persistAppState("PEMBAYARAN_UPAH", `Menandai pembayaran upah LUNAS untuk ${p.workerName} sebesar Rp ${p.amount.toLocaleString('id-ID')}`);
-    showToast("Upah berhasil ditandai Lunas!", "success");
-  }
+async function markPayoutPaid(id) {
+  try { const res=await apiRequest(`/api/wage-withdrawals/${encodeURIComponent(id)}/paid`,{method:'PATCH'}); await syncFetchState(true); renderAdminPayouts(); renderAdminWages(); showToast(res.message||'Upah berhasil ditandai Lunas!','success'); }
+  catch(err){ showToast(err.message||'Gagal memperbarui pengajuan.','danger'); }
 }
 
 // ==========================================================================
@@ -1312,28 +1235,14 @@ function renderAdminSellerBookings() {
   });
 }
 
-function approveBooking(id) {
-  const b = (appState.sellerBookings || []).find(x => x.id === id);
-  if (b) {
-    b.status = 'Aktif';
-    persistAppState("PERSETUJUAN_BOOKING", `Menyetujui booking ${b.bookingNo} oleh ${b.sellerName}`);
-    showToast("Booking seller disetujui!", "success");
-  }
+async function approveBooking(id) {
+  try { const res=await apiRequest(`/api/bookings/${encodeURIComponent(id)}/approve`,{method:'PATCH'}); await syncFetchState(true); renderAdminSellerBookings(); showToast(res.message||'Booking seller disetujui!','success'); } catch(err){ showToast(err.message||'Gagal menyetujui booking.','danger'); }
 }
 
-function rejectBooking(id) {
-  const b = (appState.sellerBookings || []).find(x => x.id === id);
-  if (b) {
-    b.status = 'Dibatalkan';
-
-    const inv = (appState.inventory || []).find(i => i.productId === b.productId && i.variantId === b.variantId);
-    if (inv) {
-      inv.bookedStock = Math.max(0, inv.bookedStock - b.qty);
-    }
-
-    persistAppState("PEMBATALAN_BOOKING", `Membatalkan booking ${b.bookingNo}`);
-    showToast("Booking dibatalkan dan stok dibebaskan.", "warning");
-  }
+async function rejectBooking(id) {
+  showConfirmDialog('Batalkan Booking','Booking akan dibatalkan dan stok yang direservasi akan langsung dilepas.',async()=>{
+    try { const res=await apiRequest(`/api/bookings/${encodeURIComponent(id)}/reject`,{method:'PATCH'}); await syncFetchState(true); renderAdminSellerBookings(); showToast(res.message||'Booking dibatalkan dan stok dibebaskan.','warning'); } catch(err){ showToast(err.message||'Gagal membatalkan booking.','danger'); }
+  });
 }
 
 function renderAdminSalesClosing() {
@@ -1371,66 +1280,24 @@ function renderAdminSalesClosing() {
   });
 }
 
-function executeClosingProcess(resiNo) {
-  if (!(appState.scannedResi || []).some(r => String(r.resiNo).toLowerCase() === String(resiNo).toLowerCase())) {
-    (appState.scannedResi || (appState.scannedResi = [])).unshift({ id: 'SCN-' + Date.now(), resiNo: String(resiNo), scannedAt: new Date().toISOString(), scannedBy: currentUser?.name || 'Admin' });
-  }
+async function executeClosingProcess(resiNo) {
   if (!currentUser || currentUser.role !== 'admin') { showToast('Hanya Admin yang dapat melakukan closing penjualan.', 'danger'); return; }
-  if ((appState.salesClosings || []).some(c => String(c.resiNo).toLowerCase() === String(resiNo).toLowerCase())) { showToast('Nomor resi ini sudah pernah di-closing.', 'warning'); return; }
   const selectedBookingId = document.getElementById('closing-booking-id')?.value;
   const activeBooking = (appState.sellerBookings || []).find(b => b.id === selectedBookingId && b.status === 'Aktif');
-  
-  if (!activeBooking) {
-    showToast(`Pilih booking aktif yang sesuai sebelum melakukan closing resi ${resiNo}.`, "danger");
-    return;
-  }
-
-  showConfirmDialog(
-    "Konfirmasi Closing Penjualan",
-    `Apakah Anda yakin ingin melakukan closing resi <strong>${resiNo}</strong> untuk booking <strong>${activeBooking.bookingNo}</strong> (${activeBooking.productName} - ${activeBooking.qty} Unit)?`,
-    () => {
-      const trxNo = "TRX-" + (new Date().toISOString().slice(0,10).replace(/-/g,'')) + "-" + Math.floor(100+Math.random()*900);
-      
-      const newClosing = {
-        id: "CLS-" + Date.now(),
-        transactionNo: trxNo,
-        resiNo: resiNo,
-        sellerId: activeBooking.sellerId,
-        sellerName: activeBooking.sellerName,
-        bookingId: activeBooking.id,
-        productId: activeBooking.productId,
-        productName: activeBooking.productName,
-        variantId: activeBooking.variantId,
-        variantName: activeBooking.variantName,
-        qty: activeBooking.qty,
-        closingDate: new Date().toISOString().slice(0,10),
-        closedByUserId: currentUser ? currentUser.id : 'USR-001',
-        createdAt: new Date().toISOString()
-      };
-
-      if (!appState.salesClosings) appState.salesClosings = [];
-      appState.salesClosings.unshift(newClosing);
-
-      activeBooking.status = 'Selesai';
-
-      const inv = (appState.inventory || []).find(i => i.productId === activeBooking.productId && i.variantId === activeBooking.variantId);
-      if (inv) {
-        inv.physicalStock = Math.max(0, inv.physicalStock - activeBooking.qty);
-        inv.bookedStock = Math.max(0, inv.bookedStock - activeBooking.qty);
-        inv.soldStock = (inv.soldStock || 0) + activeBooking.qty;
-      }
-
-      const inputResi = document.getElementById('input-closing-resi-no');
-      if (inputResi) inputResi.value = '';
-      const bookingSelect = document.getElementById('closing-booking-id');
-      if (bookingSelect) bookingSelect.value = '';
-
-      persistAppState("CLOSING_PENJUALAN", `Closing Penjualan Resi ${resiNo} sukses (Transaksi ${trxNo}). Stok diperbarui menjadi Terjual.`);
-      showToast(`Closing Penjualan ${trxNo} Sukses! Barang dicatat sebagai Terjual.`, "success");
-    }
-  );
+  if (!activeBooking) { showToast(`Pilih booking aktif yang sesuai sebelum melakukan closing resi ${resiNo}.`, 'danger'); return; }
+  showConfirmDialog('Konfirmasi Closing Penjualan', `Apakah Anda yakin ingin melakukan closing resi <strong>${resiNo}</strong> untuk booking <strong>${activeBooking.bookingNo}</strong> (${activeBooking.productName} - ${activeBooking.qty} Unit)?`, async () => {
+    try {
+      await apiRequest('/api/resi/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resiNo}) });
+      const res=await apiRequest('/api/sales-closings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resiNo,bookingId:selectedBookingId}) });
+      await syncFetchState(true);
+      renderAdminSalesClosing();
+      renderAdminSellerBookings();
+      const inputResi=document.getElementById('input-closing-resi-no'); if(inputResi) inputResi.value='';
+      const bookingSelect=document.getElementById('closing-booking-id'); if(bookingSelect) bookingSelect.value='';
+      showToast(res.message||'Closing penjualan berhasil disimpan.','success');
+    } catch(err) { showToast(err.message||'Gagal melakukan closing penjualan.','danger'); }
+  });
 }
-
 // ==========================================================================
 // 8. BARANG CACAT & RETUR
 // ==========================================================================
@@ -2038,44 +1905,29 @@ function initModalActions() {
 
   const btnSaveStockIn = document.getElementById('btn-save-stock-in');
   if (btnSaveStockIn) {
-    btnSaveStockIn.addEventListener('click', () => {
-      const pId = document.getElementById('in-product-id').value;
-      const vId = document.getElementById('in-variant-id').value;
-      const qty = parseInt(document.getElementById('in-qty').value) || 0;
+    btnSaveStockIn.addEventListener('click', async () => {
+      const productId = document.getElementById('in-product-id').value;
+      const variantId = document.getElementById('in-variant-id').value;
+      const qty = Number(document.getElementById('in-qty').value || 0);
       const supplier = document.getElementById('in-supplier').value.trim();
       const docNo = document.getElementById('in-doc-no').value.trim();
       const note = document.getElementById('in-note').value.trim();
-
-      if (!pId || !vId || qty <= 0) {
-        showToast("Pilih produk, varian, dan masukan jumlah barang!", "warning");
-        return;
+      if (!productId || !variantId || qty <= 0) return showToast('Pilih produk, varian, dan masukkan jumlah barang!', 'warning');
+      const original = btnSaveStockIn.innerHTML;
+      btnSaveStockIn.disabled = true;
+      btnSaveStockIn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+      try {
+        await apiRequest('/api/inventory/in', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({productId,variantId,qty,supplier,docNo,note}) });
+        await syncFetchState(true);
+        refreshCurrentView();
+        document.getElementById('modal-stock-in')?.classList.remove('active');
+        showToast('Barang masuk berhasil disimpan dan stok diperbarui!', 'success');
+      } catch (err) {
+        showToast(err.message || 'Barang masuk gagal disimpan.', 'danger');
+      } finally {
+        btnSaveStockIn.disabled = false;
+        btnSaveStockIn.innerHTML = original;
       }
-
-      const newStockIn = {
-        id: "STI-" + Date.now(),
-        docNo: docNo || ("IN-" + Date.now()),
-        supplier: supplier || "Supplier Utama",
-        date: new Date().toISOString().slice(0,10),
-        productId: pId,
-        variantId: vId,
-        qty: qty,
-        note: note,
-        userId: currentUser ? currentUser.id : 'USR-001',
-        createdAt: new Date().toISOString()
-      };
-
-      if (!appState.stockIns) appState.stockIns = [];
-      appState.stockIns.unshift(newStockIn);
-
-      const inv = (appState.inventory || []).find(i => i.productId === pId && i.variantId === vId);
-      if (inv) {
-        inv.physicalStock = (inv.physicalStock || 0) + qty;
-      }
-
-      const modalIn = document.getElementById('modal-stock-in');
-      if (modalIn) modalIn.classList.remove('active');
-      persistAppState("BARANG_MASUK", `Catat barang masuk ${docNo} sebanyak ${qty} unit`);
-      showToast("Barang masuk berhasil dicatat dan stok diperbarui!", "success");
     });
   }
 
@@ -2117,53 +1969,29 @@ function initModalActions() {
 
   const btnSaveStockOut = document.getElementById('btn-save-stock-out');
   if (btnSaveStockOut) {
-    btnSaveStockOut.addEventListener('click', () => {
-      const pId = document.getElementById('out-product-id').value;
-      const vId = document.getElementById('out-variant-id').value;
-      const qty = parseInt(document.getElementById('out-qty').value) || 0;
+    btnSaveStockOut.addEventListener('click', async () => {
+      const productId = document.getElementById('out-product-id').value;
+      const variantId = document.getElementById('out-variant-id').value;
+      const qty = Number(document.getElementById('out-qty').value || 0);
       const destination = document.getElementById('out-destination').value.trim();
       const reason = document.getElementById('out-reason').value.trim();
       const note = document.getElementById('out-note').value.trim();
-
-      if (!pId || !vId || qty <= 0) {
-        showToast("Pilih produk, varian, dan masukan jumlah barang keluar!", "warning");
-        return;
+      if (!productId || !variantId || qty <= 0) return showToast('Pilih produk, varian, dan masukkan jumlah barang keluar!', 'warning');
+      const original = btnSaveStockOut.innerHTML;
+      btnSaveStockOut.disabled = true;
+      btnSaveStockOut.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+      try {
+        await apiRequest('/api/inventory/out', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({productId,variantId,qty,destination,reason,note}) });
+        await syncFetchState(true);
+        refreshCurrentView();
+        document.getElementById('modal-stock-out')?.classList.remove('active');
+        showToast('Barang keluar berhasil disimpan dan stok diperbarui!', 'success');
+      } catch (err) {
+        showToast(err.message || 'Barang keluar gagal disimpan.', 'danger');
+      } finally {
+        btnSaveStockOut.disabled = false;
+        btnSaveStockOut.innerHTML = original;
       }
-
-      const inv = (appState.inventory || []).find(i => i.productId === pId && i.variantId === vId);
-      const avail = Math.max(0, (inv ? inv.physicalStock : 0) - (inv ? inv.bookedStock : 0));
-
-      if (qty > avail) {
-        showToast("Jumlah pengeluaran melebihi stok tersedia!", "danger");
-        return;
-      }
-
-      const docNo = "OUT-" + (new Date().toISOString().slice(0,10).replace(/-/g,'')) + "-" + Math.floor(100+Math.random()*900);
-      const newOut = {
-        id: "STO-" + Date.now(),
-        docNo: docNo,
-        destination: destination || "Tujuan Khusus",
-        reason: reason || "Pengeluaran Khusus",
-        date: new Date().toISOString().slice(0,10),
-        productId: pId,
-        variantId: vId,
-        qty: qty,
-        note: note,
-        userId: currentUser ? currentUser.id : 'USR-001',
-        createdAt: new Date().toISOString()
-      };
-
-      if (!appState.stockOuts) appState.stockOuts = [];
-      appState.stockOuts.unshift(newOut);
-
-      if (inv) {
-        inv.physicalStock = Math.max(0, inv.physicalStock - qty);
-      }
-
-      const modalOut = document.getElementById('modal-stock-out');
-      if (modalOut) modalOut.classList.remove('active');
-      persistAppState("BARANG_KELUAR", `Catat barang keluar ${docNo} sebanyak ${qty} unit`);
-      showToast("Barang keluar berhasil dicatat dan stok fisik berkurang!", "success");
     });
   }
 
@@ -2180,7 +2008,7 @@ function initModalActions() {
 
   const btnSaveWorkType = document.getElementById('btn-save-work-type');
   if (btnSaveWorkType) {
-    btnSaveWorkType.addEventListener('click', () => {
+    btnSaveWorkType.addEventListener('click', async () => {
       const name = document.getElementById('wt-name').value.trim();
       const rate = parseInt(document.getElementById('wt-rate').value) || 0;
       const desc = document.getElementById('wt-desc').value.trim();
@@ -2191,27 +2019,14 @@ function initModalActions() {
       }
 
       const editId = document.getElementById('wt-id')?.value;
-      if (!appState.workTypes) appState.workTypes = [];
       const existing = editId ? getWorkTypeById(editId) : null;
-      if (existing) {
-        existing.name = name;
-        existing.defaultRate = rate;
-        existing.description = desc;
-        existing.updatedAt = new Date().toISOString();
-      } else {
-        appState.workTypes.push({
-          id: "WRK-" + Date.now(),
-          name: name,
-          defaultRate: rate,
-          description: desc,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      const modal = document.getElementById('modal-work-type');
-      if (modal) modal.classList.remove('active');
-      persistAppState(existing ? "UBAH_TARIF_PEKERJAAN" : "TAMBAH_JENIS_PEKERJAAN", `${existing ? 'Mengubah' : 'Menambahkan'} jenis pekerjaan ${name} dengan nominal upah ${formatRupiah(rate)} per unit.`);
-      showToast(`Jenis pekerjaan ${name} berhasil ${existing ? 'diperbarui' : 'ditambahkan'} dengan upah ${formatRupiah(rate)}/unit!`, "success");
+      try {
+        const res=await apiRequest(existing?`/api/work-types/${encodeURIComponent(editId)}`:'/api/work-types',{method:existing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,rate,description:desc})});
+        await syncFetchState(true);
+        const modal=document.getElementById('modal-work-type'); if(modal) modal.classList.remove('active');
+        renderAdminWorkTypesList();
+        showToast(res.message||`Jenis pekerjaan ${name} berhasil disimpan.`,"success");
+      } catch(err){ showToast(err.message||'Jenis pekerjaan gagal disimpan.',"danger"); }
     });
   }
 
@@ -2674,17 +2489,27 @@ function openDashboardVariant(productId,variantId){
   document.getElementById('dashboard-detail-body').innerHTML=`<div class="variant-report-grid"><div><small>Stok Tersedia</small><strong>${available}</strong></div><div><small>Stok Lolos Pengecekan</small><strong>${checked}</strong></div><div><small>Stok Siap Kirim</small><strong>${ready}</strong></div><div><small>Stok Cacat</small><strong>${damaged}</strong></div><div><small>Stok Dibooking</small><strong>${Number(inv.bookedStock||0)}</strong></div><div><small>Jumlah Keseluruhan</small><strong>${total}</strong></div></div><div class="report-actions"><button class="btn btn-secondary" onclick="closeDashboardDetail();switchView('admin-stocks')"><i class="fa-solid fa-list"></i> Lihat Detail Stok</button><button class="btn btn-primary" onclick="closeDashboardDetail();switchView('admin-stock-ins')"><i class="fa-solid fa-plus"></i> Input Perubahan Stok</button></div>`;
 }
 
-function renderAdminDashboard(){
+async function loadDashboardSummary(){
+  try{
+    const r=await fetch(`${API_BASE}/dashboard/summary`,{headers:getAuthHeaders()});
+    if(!r.ok) return null;
+    const j=await r.json(); return j.data||null;
+  }catch(_){return null;}
+}
+
+async function renderAdminDashboard(){
   const cats=appState.categories||[]; const grid=document.getElementById('dashboard-category-grid'); if(!grid)return;
   const catCount=document.getElementById('dash-category-count'); if(catCount)catCount.innerText=`${cats.length} kategori`;
   grid.innerHTML=cats.length?cats.map(c=>{const products=(appState.products||[]).filter(p=>p.categoryId===c.id); const variants=products.reduce((n,p)=>n+(p.variants||[]).length,0); const stock=products.reduce((sum,p)=>sum+(p.variants||[]).reduce((s,v)=>s+Number((getInventory(p.id,v.id)||{}).physicalStock||0),0),0); return `<button class="category-dashboard-card" onclick="openDashboardCategory('${c.id}')"><span class="category-card-icon"><i class="fa-solid fa-boxes-stacked"></i></span><span class="category-card-main"><strong>${c.name}</strong><small>${products.length} produk • ${variants} variasi</small><em>${stock.toLocaleString('id-ID')} total unit</em></span><i class="fa-solid fa-chevron-right"></i></button>`;}).join(''):'<div class="empty-state">Belum ada kategori. Tambahkan kategori dan produk dari menu Manajemen Produk.</div>';
   const bookings=(appState.sellerBookings||[]).filter(b=>['Menunggu Persetujuan','Aktif'].includes(b.status)); const payouts=(appState.payoutRequests||[]).filter(p=>p.status==='Menunggu Persetujuan');
-  const inv=appState.inventory||[]; const booked=inv.reduce((s,x)=>s+Number(x.bookedStock||0),0); const payoutTotal=payouts.reduce((s,p)=>s+Number(p.amount||0),0);
-  document.getElementById('dash-booking-count').innerText=`${booked.toLocaleString('id-ID')} unit`;
+  const inv=appState.inventory||[]; const fallbackBooked=inv.reduce((s,x)=>s+Number(x.bookedStock||0),0); const payoutTotal=payouts.reduce((s,p)=>s+Number(p.amount||0),0);
+  const summary=await loadDashboardSummary();
+  const booked=summary?.totalBookedStock ?? fallbackBooked;
+  document.getElementById('dash-booking-count').innerText=`${Number(booked).toLocaleString('id-ID')} unit`;
   document.getElementById('dash-payout-total').innerText=formatRupiah(payoutTotal);
-  document.getElementById('dash-resi-count').innerText=`${(appState.scannedResi||appState.salesClosings||[]).length} resi`;
-  const available=inv.reduce((s,x)=>s+getAvailableStock(x),0), sold=inv.reduce((s,x)=>s+Number(x.soldStock||0),0), damaged=(appState.damagedGoods||[]).reduce((s,x)=>s+Number(x.qty||0),0), returned=(appState.returnedGoods||[]).reduce((s,x)=>s+Number(x.qty||0),0);
-  renderAdminCharts(0,0,sold,available,booked,damaged,returned);
+  document.getElementById('dash-resi-count').innerText=`${summary?.scannedResi ?? (appState.scannedResi||appState.salesClosings||[]).length} resi`;
+  const available=summary?.totalAvailableStock ?? inv.reduce((s,x)=>s+getAvailableStock(x),0), sold=summary?.totalSoldStock ?? inv.reduce((s,x)=>s+Number(x.soldStock||0),0), damaged=summary?.totalDamagedStock ?? (appState.damagedGoods||[]).reduce((s,x)=>s+Number(x.qty||0),0), returned=summary?.returnsInPeriod ?? (appState.returnedGoods||[]).reduce((s,x)=>s+Number(x.qty||0),0);
+  renderAdminCharts(summary?.stockIn||0,summary?.stockOut||0,sold,available,booked,damaged,returned);
 }
 
 function getProfileRecord(){ if(!currentUser)return {}; return appState.userProfiles?.[currentUser.id]||{}; }
