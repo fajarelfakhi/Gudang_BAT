@@ -70,15 +70,139 @@ async function getState(client) {
 }
 
 app.get('/api/health', async (req,res)=>{ try { await pool.query('SELECT 1'); res.json({success:true,status:'ok',app:'GUDANG BAT',timestamp:new Date().toISOString()}); } catch(e){res.status(503).json({success:false,message:'Database tidak tersedia'});} });
+
+app.post('/api/register', async (req,res)=>{
+  try {
+    const { username, password, name, email, phone, requestedRole, note } = req.body || {};
+    const uName = String(username || '').trim().toLowerCase();
+    const uPass = String(password || '').trim();
+    const fullName = String(name || uName).trim();
+    if (!uName || !uPass || !fullName) return res.status(400).json({ success: false, message: 'Username, password, dan nama lengkap wajib diisi.' });
+    if (uPass.length < 6) return res.status(400).json({ success: false, message: 'Password minimal 6 karakter.' });
+
+    const existing = await pool.query('SELECT id FROM users WHERE LOWER(username)=$1 OR (email IS NOT NULL AND LOWER(email)=$2) LIMIT 1', [uName, String(email || '').trim().toLowerCase()]);
+    if (existing.rowCount > 0) return res.status(409).json({ success: false, message: 'Username atau Email sudah terdaftar.' });
+
+    const hash = await bcrypt.hash(uPass, 12);
+    const userId = 'USR-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const userRole = 'pending';
+    const status = 'pending';
+
+    await pool.query(
+      `INSERT INTO users(id, username, password_hash, name, role, email, phone, status) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [userId, uName, hash, fullName, userRole, String(email || '').trim() || null, String(phone || '').trim() || null, status]
+    );
+
+    // Tambahkan log pendaftaran ke state
+    await mutateState((state) => {
+      state.pendingRegistrations = state.pendingRegistrations || [];
+      state.pendingRegistrations.unshift({
+        id: userId,
+        username: uName,
+        name: fullName,
+        email: email || '',
+        phone: phone || '',
+        requestedRole: requestedRole || 'seller',
+        note: note || '',
+        registeredAt: new Date().toISOString()
+      });
+      state.activityLogs = state.activityLogs || [];
+      state.activityLogs.unshift({
+        id: 'ACT-' + Date.now(),
+        type: 'REGISTRASI_BARU',
+        description: `Pengguna baru '${fullName}' (${uName}) mendaftar dan menunggu persetujuan Admin.`,
+        userId,
+        createdAt: new Date().toISOString()
+      });
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Registrasi berhasil! Akun Anda telah terdaftar dan sedang menunggu persetujuan & penentuan hak akses oleh Admin.'
+    });
+  } catch (e) {
+    console.error('Error register:', e);
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan saat pendaftaran.' });
+  }
+});
+
 app.post('/api/login', async (req,res)=>{
   try {
     const {username,password}=req.body||{}; if(!username||!password) return res.status(400).json({success:false,message:'Username dan password wajib diisi.'});
-    const r=await pool.query('SELECT * FROM users WHERE username=$1 OR email=$1 LIMIT 1',[String(username)]); const u=r.rows[0];
-    if(!u || u.status!=='active' || !(await bcrypt.compare(String(password),u.password_hash))) return res.status(401).json({success:false,message:'Username atau password salah, atau akun tidak aktif.'});
-    const user=publicUser(u); const token=jwt.sign({id:user.id,role:user.role,username:user.username},JWT_SECRET,{expiresIn:'12h'});
+    const r=await pool.query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1',[String(username).trim()]); const u=r.rows[0];
+    if(!u) return res.status(401).json({success:false,message:'Username atau password salah.'});
+    if(u.status === 'pending') return res.status(403).json({success:false,message:'Akun Anda masih dalam status Menunggu Persetujuan Admin.'});
+    if(u.status !== 'active') return res.status(403).json({success:false,message:'Akun Anda telah dinonaktifkan atau ditolak.'});
+    if(!(await bcrypt.compare(String(password),u.password_hash))) return res.status(401).json({success:false,message:'Username atau password salah.'});
+    const user=publicUser(u); const token=jwt.sign({id:user.id,role:user.role,username:user.username},JWT_SECRET,{expiresIn:'24h'});
     res.json({success:true,message:'Login berhasil.',token,user});
   } catch(e){ console.error(e); res.status(500).json({success:false,message:'Terjadi kesalahan saat login.'}); }
 });
+
+app.get('/api/users/pending', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const r = await pool.query("SELECT id,username,name,role,email,phone,status,created_at FROM users WHERE status='pending' ORDER BY created_at DESC");
+    res.json({success:true, data: r.rows.map(publicUser)});
+  } catch(e){ res.status(500).json({success:false,message:'Gagal mengambil daftar pengguna pending.'}); }
+});
+
+app.patch('/api/users/:id/approve', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const { role } = req.body || {};
+    const assignedRole = String(role || 'seller').trim();
+    const userId = req.params.id;
+    const r = await pool.query("UPDATE users SET status='active', role=$1, updated_at=NOW() WHERE id=$2 RETURNING id,username,name,role,status", [assignedRole, userId]);
+    if (!r.rowCount) return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'});
+    const u = r.rows[0];
+    await mutateState((state) => {
+      state.pendingRegistrations = (state.pendingRegistrations || []).filter(x => x.id !== userId);
+      state.activityLogs = state.activityLogs || [];
+      state.activityLogs.unshift({
+        id: 'ACT-' + Date.now(),
+        type: 'SETUJUI_AKUN',
+        description: `Admin menyetujui akun '${u.name}' (${u.username}) dengan peran '${u.role}'.`,
+        userId: req.user.id,
+        createdAt: new Date().toISOString()
+      });
+    });
+    res.json({success:true, message: `Akun '${u.name}' berhasil disetujui sebagai '${u.role}'.`, data: publicUser(u)});
+  } catch(e){ res.status(500).json({success:false,message:'Gagal menyetujui akun.'}); }
+});
+
+app.patch('/api/users/:id/reject', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const userId = req.params.id;
+    const r = await pool.query("UPDATE users SET status='rejected', updated_at=NOW() WHERE id=$1 RETURNING id,username,name", [userId]);
+    if (!r.rowCount) return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'});
+    const u = r.rows[0];
+    await mutateState((state) => {
+      state.pendingRegistrations = (state.pendingRegistrations || []).filter(x => x.id !== userId);
+      state.activityLogs = state.activityLogs || [];
+      state.activityLogs.unshift({
+        id: 'ACT-' + Date.now(),
+        type: 'TOLAK_AKUN',
+        description: `Admin menolak pendaftaran akun '${u.name}' (${u.username}).`,
+        userId: req.user.id,
+        createdAt: new Date().toISOString()
+      });
+    });
+    res.json({success:true, message: `Pendaftaran akun '${u.name}' ditolak.`, data: publicUser(u)});
+  } catch(e){ res.status(500).json({success:false,message:'Gagal menolak akun.'}); }
+});
+
+app.patch('/api/users/:id/role', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const { role, status } = req.body || {};
+    const userId = req.params.id;
+    const old = await pool.query('SELECT * FROM users WHERE id=$1', [userId]);
+    if (!old.rowCount) return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'});
+    const newRole = role ? String(role).trim() : old.rows[0].role;
+    const newStatus = status ? String(status).trim() : old.rows[0].status;
+    const r = await pool.query("UPDATE users SET role=$1, status=$2, updated_at=NOW() WHERE id=$3 RETURNING id,username,name,role,status", [newRole, newStatus, userId]);
+    res.json({success:true, message: 'Peran & status pengguna berhasil diperbarui.', data: publicUser(r.rows[0])});
+  } catch(e){ res.status(500).json({success:false,message:'Gagal memperbarui pengguna.'}); }
+});
+
 app.get('/api/sync/version', auth, async (req,res)=>{
   try {
     const r = await pool.query('SELECT version, updated_at FROM app_state WHERE id=1');
@@ -423,24 +547,54 @@ app.post('/api/state', auth, async (req,res)=>{
   const client=await pool.connect();
   try {
     await client.query('BEGIN');
-    const current=await client.query('SELECT version FROM app_state WHERE id=1 FOR UPDATE');
-    const version=Number(current.rows[0]?.version||0); const expected=Number(req.headers['x-state-version']||0);
-    if(expected && expected!==version){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Data telah berubah di perangkat lain.',version}); }
-    const incoming=req.body||{}; await syncUsers(client,incoming.users||[]);
-    const {users,...state}=incoming;
+    const current=await client.query('SELECT state, version FROM app_state WHERE id=1 FOR UPDATE');
+    const dbState=current.rows[0]?.state || {};
+    const version=Number(current.rows[0]?.version||0);
+    const rawHeader = req.headers['x-state-version'];
+    const expected = (rawHeader !== undefined && rawHeader !== null && rawHeader !== '') ? Number(rawHeader) : null;
+
+    if (expected !== null && !isNaN(expected) && expected !== version) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({success:false, message:'Data telah berubah di perangkat lain. Silakan sinkronkan ulang.', version});
+    }
+
+    const incoming = req.body || {};
+
+    // Proteksi data kosong: Cegah peranti menimpa database dengan state kosong jika DB sudah memiliki produk/kategori
+    const dbHasData = (Array.isArray(dbState.products) && dbState.products.length > 0) || (Array.isArray(dbState.categories) && dbState.categories.length > 0);
+    const incomingIsEmpty = (!Array.isArray(incoming.products) || incoming.products.length === 0) && (!Array.isArray(incoming.categories) || incoming.categories.length === 0);
+    if (dbHasData && incomingIsEmpty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({success:false, message:'Penimpaan ditolak karena data pengganti tidak lengkap atau kosong.', version});
+    }
+
+    await syncUsers(client, incoming.users || []);
+    const {users, ...state} = incoming;
     const saved=await client.query('UPDATE app_state SET state=$1::jsonb, version=version+1, updated_at=NOW() WHERE id=1 RETURNING version',[JSON.stringify(state)]);
-    await client.query('COMMIT'); res.json({success:true,message:'Data berhasil disimpan.',version:Number(saved.rows[0].version)});
-  } catch(e){ try{await client.query('ROLLBACK')}catch{}; console.error(e); res.status(500).json({success:false,message:'Gagal menyimpan data.'}); }
+    await client.query('COMMIT');
+    res.json({success:true, message:'Data berhasil disimpan.', version:Number(saved.rows[0].version)});
+  } catch(e){
+    try{await client.query('ROLLBACK')}catch{};
+    console.error(e);
+    res.status(500).json({success:false, message:'Gagal menyimpan data.'});
+  }
   finally{client.release();}
 });
+
 app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Endpoint API tidak ditemukan.'}));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 async function bootstrap(){
-  await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL CHECK(role IN ('admin','gudang','seller')), email text, phone text, status text NOT NULL DEFAULT 'active', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  try { await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;`); } catch(e){}
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state (id integer PRIMARY KEY CHECK(id=1), state jsonb NOT NULL DEFAULT '{}'::jsonb, version bigint NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now());`);
   const exists=await pool.query('SELECT 1 FROM app_state WHERE id=1');
-  if(!exists.rowCount){ const seed=JSON.parse(fs.readFileSync(path.join(__dirname,'database','seed.json'),'utf8')); await pool.query('INSERT INTO app_state(id,state,version) VALUES(1,$1::jsonb,1)',[JSON.stringify(Object.fromEntries(Object.entries(seed).filter(([k])=>k!=='users')))]); await syncUsers(pool,seed.users||[]); console.log('Data awal berhasil diimpor.'); }
+  if(!exists.rowCount){
+    const seed=JSON.parse(fs.readFileSync(path.join(__dirname,'database','seed.json'),'utf8'));
+    await pool.query('INSERT INTO app_state(id,state,version) VALUES(1,$1::jsonb,1)',[JSON.stringify(Object.fromEntries(Object.entries(seed).filter(([k])=>k!=='users')))]);
+    await syncUsers(pool,seed.users||[]);
+    console.log('Data awal berhasil diimpor.');
+  }
   app.listen(PORT,'0.0.0.0',()=>console.log(`GUDANG BAT online server berjalan di port ${PORT}`));
 }
 bootstrap().catch(e=>{console.error('Gagal bootstrap:',e);process.exit(1)});
