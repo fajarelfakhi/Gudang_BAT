@@ -211,12 +211,9 @@ function renderCompanyLogo() {
 document.addEventListener('DOMContentLoaded', () => {
   initThemeMode();
   initEventListeners();
-  loadAppState().then(async () => {
-    if (expireSellerBookings() && isStateInitialized) {
-      await persistAppState('BOOKING_KEDALUWARSA', 'Sistem otomatis melepas booking yang telah melewati masa berlaku.');
-    }
-    checkSavedSession();
-  });
+  // Jangan memuat atau menyimpan state sebelum sesi pengguna tervalidasi.
+  // Ini mencegah perangkat baru dengan state lokal kosong menimpa data server.
+  checkSavedSession();
 
   // Sinkronisasi multi-device berkala: polling versi ringan
   setInterval(async () => {
@@ -240,7 +237,7 @@ async function loadAppState() {
     const res = await fetch(`${API_BASE}/state`, { headers: getAuthHeaders() });
     if (res.ok) {
       const data = await res.json();
-      if (data && data.users) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.success !== false) {
         stateVersion = Number(res.headers.get('X-State-Version') || data._version || stateVersion || 0);
         localStorage.setItem('gudangbat_state_version', String(stateVersion));
         delete data._version;
@@ -261,7 +258,7 @@ async function syncFetchState(silent = false) {
     const res = await fetch(`${API_BASE}/state`, { headers: getAuthHeaders() });
     if (res.ok) {
       const data = await res.json();
-      if (data && data.users) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.success !== false) {
         stateVersion = Number(res.headers.get('X-State-Version') || data._version || stateVersion || 0);
         localStorage.setItem('gudangbat_state_version', String(stateVersion));
         delete data._version;
@@ -301,9 +298,13 @@ async function persistAppState(logAction = null, logDetails = "") {
     const res = await fetch(`${API_BASE}/state`, {
       method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json', 'X-State-Version': String(stateVersion || 0) }), body: snapshot
     });
-    if (res.status === 409) throw new Error('Data telah diubah oleh perangkat lain. Silakan sinkronkan ulang sebelum menyimpan kembali.');
-    if (!res.ok) throw new Error('Server menolak penyimpanan data.');
-    const result = await res.json().catch(() => ({ success: true }));
+    if (res.status === 409) {
+      await syncFetchState(true);
+      throw new Error('Data telah diubah oleh perangkat lain. Data terbaru dari server sudah dimuat. Silakan ulangi perubahan Anda.');
+    }
+    const result = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(result?.message || 'Server menolak penyimpanan data.');
+    if (!result) throw new Error('Server tidak mengirim konfirmasi penyimpanan.');
     if (result && result.version !== undefined) { stateVersion = Number(result.version); localStorage.setItem('gudangbat_state_version', String(stateVersion)); }
     if (result && result.success === false) throw new Error(result.message || 'Penyimpanan gagal.');
   }).catch(err => {
