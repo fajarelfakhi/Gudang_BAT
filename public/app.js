@@ -195,7 +195,10 @@ function renderCompanyLogo() {
   const whName = appState.settings?.warehouseName || 'SISTEM MANAJEMEN GUDANG MULTI-USER';
 
   const logoImg = document.getElementById('login-company-logo-img');
-  const logoIcon = document.getElementById('login-company-icon');
+  // Fallback logo pada tampilan login sederhana. ID ini harus unik agar
+  // logo perusahaan benar-benar MENGGANTIKAN ikon 3 kotak, bukan tampil di atasnya.
+  const loginFallback = document.getElementById('login-company-fallback');
+  const bannerIcon = document.getElementById('login-banner-company-icon');
   const appNameEl = document.getElementById('login-app-name');
   const whNameEl = document.getElementById('login-warehouse-name');
 
@@ -204,12 +207,20 @@ function renderCompanyLogo() {
 
   if (logoImg) {
     if (logoUrl) {
+      // Logo custom menggantikan ikon bawaan (3 kotak) di posisi yang sama.
       logoImg.src = logoUrl;
       logoImg.classList.remove('hidden');
-      if (logoIcon) logoIcon.classList.add('hidden');
+      if (loginFallback) loginFallback.classList.add('hidden');
+      if (bannerIcon) bannerIcon.classList.add('hidden');
+      logoImg.onerror = () => {
+        logoImg.classList.add('hidden');
+        if (loginFallback) loginFallback.classList.remove('hidden');
+      };
     } else {
+      logoImg.removeAttribute('src');
       logoImg.classList.add('hidden');
-      if (logoIcon) logoIcon.classList.remove('hidden');
+      if (loginFallback) loginFallback.classList.remove('hidden');
+      if (bannerIcon) bannerIcon.classList.remove('hidden');
     }
   }
 
