@@ -43,13 +43,13 @@ let pendingConfirmAction = null;
 
 let saveQueue = Promise.resolve();
 let saveInProgress = false;
-let stateVersion = Number(sessionStorage.getItem('gudangbat_state_version') || 0);
+let isStateInitialized = false;
+let stateVersion = Number(localStorage.getItem('gudangbat_state_version') || 0);
 
 function getAuthHeaders(extra = {}) {
-  const token = sessionStorage.getItem('gudangbat_token');
+  const token = localStorage.getItem('gudangbat_token');
   return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
-
 
 async function apiRequest(url, options = {}) {
   const res = await fetch(url, { ...options, headers: getAuthHeaders(options.headers || {}) });
@@ -59,19 +59,53 @@ async function apiRequest(url, options = {}) {
   return data;
 }
 
+const ALL_PERMISSIONS = [
+  { id: 'dashboard.view', label: 'Akses Dashboard & Ringkasan Statistik' },
+  { id: 'products.manage', label: 'Kelola Katalog Produk & Varian (Tambah/Edit/Hapus)' },
+  { id: 'stocks.view', label: 'Melihat Data Stok & Riwayat Mutasi' },
+  { id: 'inventory.in_out', label: 'Input Barang Masuk & Barang Keluar' },
+  { id: 'inventory.qc', label: 'Pemeriksaan Quality Control (QC) & Lapor Cacat/Retur' },
+  { id: 'sales.closing', label: 'Closing Resi Penjualan & Scan Barcode Resi' },
+  { id: 'seller.booking', label: 'Buat & Kelola Booking Stok Seller' },
+  { id: 'work.reports', label: 'Input & Lihat Laporan Pekerjaan Worker Gudang' },
+  { id: 'wages.manage', label: 'Manajemen Tarif Pekerjaan, Upah & Pencairan Dana' },
+  { id: 'system.settings', label: 'Pengaturan Sistem, Logo Perusahaan & Kelola User' },
+  { id: 'rbac.manage', label: 'Manajemen Hak Akses & Matriks Peran (RBAC)' }
+];
+
 function ensureStateShape() {
   const defaults = {
-    settings: { appName: 'GUDANG BAT', warehouseName: 'Gudang BAT', bookingExpiryDays: 3, minStockDefault: 10 },
+    settings: {
+      appName: 'GUDANG BAT',
+      warehouseName: 'Gudang Utama BAT Logistics',
+      bookingExpiryDays: 3,
+      minStockDefault: 10,
+      companyLogo: ''
+    },
     users: [], categories: [], products: [], inventory: [], stockMutations: [], stockIns: [], stockOuts: [],
     workTypes: [], workRates: [], workTargets: [], workReports: [], payoutRequests: [], sellerBookings: [],
-    shippingResi: [], scannedResi: [], userProfiles: {}, salesClosings: [], damagedGoods: [], returnedGoods: [], activityLogs: []
+    shippingResi: [], scannedResi: [], userProfiles: {}, salesClosings: [], damagedGoods: [], returnedGoods: [], activityLogs: [],
+    pendingRegistrations: [], customRoles: [],
+    rbac: {
+      rolePermissions: {
+        admin: ALL_PERMISSIONS.map(p => p.id),
+        gudang: ['dashboard.view', 'stocks.view', 'inventory.qc', 'work.reports', 'wages.manage'],
+        seller: ['dashboard.view', 'stocks.view', 'seller.booking', 'sales.closing']
+      }
+    }
   };
+
   Object.keys(defaults).forEach(k => {
     if (appState[k] === undefined || appState[k] === null) appState[k] = defaults[k];
   });
   appState.settings = { ...defaults.settings, ...(appState.settings || {}) };
+  appState.rbac = { ...defaults.rbac, ...(appState.rbac || {}) };
+  if (!appState.rbac.rolePermissions) appState.rbac.rolePermissions = defaults.rbac.rolePermissions;
   if (!appState.userProfiles || typeof appState.userProfiles !== 'object') appState.userProfiles = {};
-  appState.inventory.forEach(i => {
+  if (!Array.isArray(appState.customRoles)) appState.customRoles = [];
+  if (!Array.isArray(appState.pendingRegistrations)) appState.pendingRegistrations = [];
+
+  (appState.inventory || []).forEach(i => {
     ['physicalStock','bookedStock','processStock','soldStock','damagedStock'].forEach(k => i[k] = Number(i[k] || 0));
   });
 }
@@ -115,17 +149,76 @@ function expireSellerBookings() {
   return changed;
 }
 
+function initThemeMode() {
+  const savedTheme = localStorage.getItem('gudangbat_theme') || 'light';
+  if (savedTheme === 'dark') {
+    document.body.classList.add('dark-theme');
+  } else {
+    document.body.classList.remove('dark-theme');
+  }
+  const themeIcon = document.getElementById('theme-icon');
+  if (themeIcon) themeIcon.className = savedTheme === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+}
+
+function renderCompanyLogo() {
+  const logoUrl = appState.settings?.companyLogo || '';
+  const appName = appState.settings?.appName || 'GUDANG BAT';
+  const whName = appState.settings?.warehouseName || 'SISTEM MANAJEMEN GUDANG MULTI-USER';
+
+  const logoImg = document.getElementById('login-company-logo-img');
+  const logoIcon = document.getElementById('login-company-icon');
+  const appNameEl = document.getElementById('login-app-name');
+  const whNameEl = document.getElementById('login-warehouse-name');
+
+  if (appNameEl) appNameEl.innerHTML = appName.includes(' ') ? appName.replace(' ', '<span>') + '</span>' : `${appName}<span>BAT</span>`;
+  if (whNameEl) whNameEl.textContent = whName;
+
+  if (logoImg) {
+    if (logoUrl) {
+      logoImg.src = logoUrl;
+      logoImg.classList.remove('hidden');
+      if (logoIcon) logoIcon.classList.add('hidden');
+    } else {
+      logoImg.classList.add('hidden');
+      if (logoIcon) logoIcon.classList.remove('hidden');
+    }
+  }
+
+  const sbAppName = document.getElementById('sidebar-app-name');
+  const sbAppSub = document.getElementById('sidebar-app-sub');
+  if (sbAppName) sbAppName.innerHTML = appName.includes(' ') ? appName.replace(' ', '<span>') + '</span>' : `${appName}<span>BAT</span>`;
+  if (sbAppSub) sbAppSub.textContent = whName;
+
+  const prevImg = document.getElementById('setting-logo-preview');
+  const prevPlaceholder = document.getElementById('setting-logo-placeholder');
+  const settingInput = document.getElementById('setting-company-logo');
+  if (settingInput && !settingInput.value) settingInput.value = logoUrl;
+  if (prevImg) {
+    if (logoUrl) {
+      prevImg.src = logoUrl;
+      prevImg.classList.remove('hidden');
+      if (prevPlaceholder) prevPlaceholder.classList.add('hidden');
+    } else {
+      prevImg.classList.add('hidden');
+      if (prevPlaceholder) prevPlaceholder.classList.remove('hidden');
+    }
+  }
+}
+
 // ==========================================================================
 // 1. SYSTEM INITIALIZATION & API SYNC ENGINE
 // ==========================================================================
 document.addEventListener('DOMContentLoaded', () => {
+  initThemeMode();
   initEventListeners();
   loadAppState().then(async () => {
-    if (expireSellerBookings()) await persistAppState('BOOKING_KEDALUWARSA', 'Sistem otomatis melepas booking yang telah melewati masa berlaku.');
+    if (expireSellerBookings() && isStateInitialized) {
+      await persistAppState('BOOKING_KEDALUWARSA', 'Sistem otomatis melepas booking yang telah melewati masa berlaku.');
+    }
     checkSavedSession();
   });
 
-  // Sinkronisasi multi-device: cek versi ringan terlebih dahulu, lalu unduh state hanya bila berubah.
+  // Sinkronisasi multi-device berkala: polling versi ringan
   setInterval(async () => {
     if (currentUser && !saveInProgress && navigator.onLine) {
       try {
@@ -134,9 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
           const v = await r.json();
           if (Number(v.version || 0) !== Number(stateVersion || 0)) await syncFetchState(true);
         }
-      } catch (_) { /* koneksi sementara putus, coba lagi pada siklus berikutnya */ }
+      } catch (_) { /* polling error silent fallback */ }
     }
-  }, 10000);
+  }, 8000);
 
   window.addEventListener('online', () => { if (currentUser && !saveInProgress) syncFetchState(true); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && currentUser && !saveInProgress) syncFetchState(true); });
@@ -149,15 +242,17 @@ async function loadAppState() {
       const data = await res.json();
       if (data && data.users) {
         stateVersion = Number(res.headers.get('X-State-Version') || data._version || stateVersion || 0);
-        sessionStorage.setItem('gudangbat_state_version', String(stateVersion));
+        localStorage.setItem('gudangbat_state_version', String(stateVersion));
         delete data._version;
         appState = data;
+        isStateInitialized = true;
         ensureStateShape();
+        renderCompanyLogo();
         return;
       }
     }
   } catch (err) {
-    console.warn("Backend REST API offline, menggunakan state memori lokal.");
+    console.warn("Backend REST API offline atau belum diautentikasi.");
   }
 }
 
@@ -168,10 +263,12 @@ async function syncFetchState(silent = false) {
       const data = await res.json();
       if (data && data.users) {
         stateVersion = Number(res.headers.get('X-State-Version') || data._version || stateVersion || 0);
-        sessionStorage.setItem('gudangbat_state_version', String(stateVersion));
+        localStorage.setItem('gudangbat_state_version', String(stateVersion));
         delete data._version;
         appState = data;
+        isStateInitialized = true;
         ensureStateShape();
+        renderCompanyLogo();
         if (!silent) showToast("Data berhasil disinkronisasi dengan server.", "success");
         refreshCurrentView();
       }
@@ -182,12 +279,18 @@ async function syncFetchState(silent = false) {
 }
 
 async function persistAppState(logAction = null, logDetails = "") {
+  if (!isStateInitialized) {
+    console.warn("Penyimpanan dibatalkan karena state lokal belum diawali dari database.");
+    return false;
+  }
+
   if (logAction && currentUser) {
     const newLog = {
       id: 'LOG-' + Date.now(), userId: currentUser.id, userName: currentUser.name,
       userRole: currentUser.role, action: logAction, details: logDetails,
       ipAddress: '127.0.0.1', createdAt: new Date().toISOString()
     };
+    appState.activityLogs = appState.activityLogs || [];
     appState.activityLogs.unshift(newLog);
   }
 
@@ -201,7 +304,7 @@ async function persistAppState(logAction = null, logDetails = "") {
     if (res.status === 409) throw new Error('Data telah diubah oleh perangkat lain. Silakan sinkronkan ulang sebelum menyimpan kembali.');
     if (!res.ok) throw new Error('Server menolak penyimpanan data.');
     const result = await res.json().catch(() => ({ success: true }));
-    if (result && result.version !== undefined) { stateVersion = Number(result.version); sessionStorage.setItem('gudangbat_state_version', String(stateVersion)); }
+    if (result && result.version !== undefined) { stateVersion = Number(result.version); localStorage.setItem('gudangbat_state_version', String(stateVersion)); }
     if (result && result.success === false) throw new Error(result.message || 'Penyimpanan gagal.');
   }).catch(err => {
     console.error('Gagal menyimpan ke database server:', err);
@@ -217,19 +320,30 @@ async function persistAppState(logAction = null, logDetails = "") {
 }
 
 // ==========================================================================
-// 2. AUTHENTICATION & LOGIN SCREEN
+// 2. AUTHENTICATION, REGISTRATION & LOGIN ENGINE
 // ==========================================================================
-function fillQuickLogin(username, password) {
-  const userInput = document.getElementById('login-username');
-  const passInput = document.getElementById('login-password');
-  if (userInput) userInput.value = username;
-  if (passInput) passInput.value = password;
+function switchAuthTab(tab) {
+  const btnLogin = document.getElementById('tab-btn-login');
+  const btnReg = document.getElementById('tab-btn-register');
+  const formLogin = document.getElementById('form-login');
+  const formReg = document.getElementById('form-register');
+  const loginAlert = document.getElementById('login-alert');
+  const regAlert = document.getElementById('register-success-alert');
 
-  showToast(`Akun demo ${username} dipilih! Memproses masuk...`, "primary");
-  
-  setTimeout(() => {
-    performLoginProcess();
-  }, 300);
+  if (loginAlert) loginAlert.classList.add('hidden');
+  if (regAlert) regAlert.classList.add('hidden');
+
+  if (tab === 'login') {
+    if (btnLogin) btnLogin.classList.add('active');
+    if (btnReg) btnReg.classList.remove('active');
+    if (formLogin) formLogin.classList.remove('hidden');
+    if (formReg) formReg.classList.add('hidden');
+  } else {
+    if (btnReg) btnReg.classList.add('active');
+    if (btnLogin) btnLogin.classList.remove('active');
+    if (formReg) formReg.classList.remove('hidden');
+    if (formLogin) formLogin.classList.add('hidden');
+  }
 }
 
 async function performLoginProcess() {
@@ -281,8 +395,8 @@ async function performLoginProcess() {
     }
 
     if (res.ok && result && result.success && result.user) {
-      if (result.token) sessionStorage.setItem('gudangbat_token', result.token);
-      loginSuccess(result.user);
+      if (result.token) localStorage.setItem('gudangbat_token', result.token);
+      await loginSuccess(result.user, result.token);
       return;
     }
 
@@ -293,16 +407,59 @@ async function performLoginProcess() {
 
   } catch (err) {
     console.error('Gagal menghubungi backend:', err);
-
     const isTimeout = err?.name === 'AbortError';
     const message = isTimeout
       ? 'Server terlalu lama merespons. Pastikan backend GUDANG BAT sedang berjalan.'
-      : 'Tidak dapat terhubung ke server. Jalankan backend_server.ps1 lalu muat ulang halaman.';
+      : (err.message || 'Tidak dapat terhubung ke server. Periksa koneksi backend Anda.');
 
     if (alertText) alertText.innerText = message;
     if (alertBox) alertBox.classList.remove('hidden');
   } finally {
     resetLoginBtn(submitBtn, originalBtnHtml);
+  }
+}
+
+async function performRegistrationProcess() {
+  const username = document.getElementById('reg-username')?.value.trim();
+  const name = document.getElementById('reg-fullname')?.value.trim();
+  const email = document.getElementById('reg-email')?.value.trim();
+  const phone = document.getElementById('reg-phone')?.value.trim();
+  const requestedRole = document.getElementById('reg-role-requested')?.value;
+  const password = document.getElementById('reg-password')?.value;
+  const passwordConfirm = document.getElementById('reg-password-confirm')?.value;
+  const btnSubmit = document.getElementById('btn-register-submit');
+  const alertSuccess = document.getElementById('register-success-alert');
+  const alertSuccessText = document.getElementById('register-success-text');
+
+  if (!username || !name || !password) return showToast('Lengkapi username, nama lengkap, dan password.', 'warning');
+  if (password !== passwordConfirm) return showToast('Password dan Konfirmasi Password tidak cocok!', 'danger');
+  if (password.length < 6) return showToast('Password minimal 6 karakter.', 'warning');
+
+  let origHtml = '';
+  if (btnSubmit) { origHtml = btnSubmit.innerHTML; btnSubmit.disabled = true; btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mengirim Pendaftaran...'; }
+
+  try {
+    const res = await apiRequest(`${API_BASE}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, name, email, phone, requestedRole })
+    });
+
+    if (alertSuccess && alertSuccessText) {
+      alertSuccessText.innerText = res.message || 'Registrasi berhasil! Menunggu persetujuan Admin.';
+      alertSuccess.classList.remove('hidden');
+    }
+    showToast('Registrasi berhasil! Akun Anda kini menunggu persetujuan Admin.', 'success');
+    document.getElementById('form-register')?.reset();
+    setTimeout(() => {
+      switchAuthTab('login');
+      const loginUserInput = document.getElementById('login-username');
+      if (loginUserInput) loginUserInput.value = username;
+    }, 2000);
+  } catch (err) {
+    showToast(err.message || 'Gagal mendaftar. Silakan coba lagi.', 'danger');
+  } finally {
+    if (btnSubmit) { btnSubmit.disabled = false; btnSubmit.innerHTML = origHtml; }
   }
 }
 
@@ -313,10 +470,14 @@ function resetLoginBtn(submitBtn, originalHtml) {
   }
 }
 
-function loginSuccess(user) {
+async function loginSuccess(user, token = null) {
   currentUser = user;
-  sessionStorage.setItem('gudangbat_user', JSON.stringify(user));
+  if (token) localStorage.setItem('gudangbat_token', token);
+  localStorage.setItem('gudangbat_user', JSON.stringify(user));
   
+  // Wajib muat state dari server terlebih dahulu sebelum menampilkan UI!
+  await syncFetchState(true);
+
   const loginScreen = document.getElementById('login-screen');
   const appLayout = document.getElementById('app-layout');
 
@@ -351,21 +512,26 @@ function loginSuccess(user) {
   } else if (user.role === 'seller') {
     if (navSeller) navSeller.classList.remove('hidden');
     switchView('seller-dashboard');
+  } else {
+    // Custom Role
+    if (navGudang) navGudang.classList.remove('hidden');
+    switchView('gudang-dashboard');
   }
 
   setProfilePhotoUI((appState.userProfiles && appState.userProfiles[user.id] && appState.userProfiles[user.id].avatarData) || '');
+  renderCompanyLogo();
+  updateNotificationBadges();
   showToast(`Login berhasil. Selamat datang, ${user.name}!`, "success");
-  persistAppState("LOGIN", `Pengguna ${user.name} (${user.role}) berhasil masuk ke dashboard.`);
 }
 
-function checkSavedSession() {
-  const saved = sessionStorage.getItem('gudangbat_user');
-  const token = sessionStorage.getItem('gudangbat_token');
+async function checkSavedSession() {
+  const saved = localStorage.getItem('gudangbat_user');
+  const token = localStorage.getItem('gudangbat_token');
   if (saved && token) {
     try {
       const user = JSON.parse(saved);
       if (user && user.id) {
-        loginSuccess(user);
+        await loginSuccess(user, token);
       }
     } catch (e) {}
   }
@@ -591,8 +757,58 @@ function initEventListeners() {
     themeToggle.addEventListener('click', () => {
       document.body.classList.toggle('dark-theme');
       const isDark = document.body.classList.contains('dark-theme');
+      localStorage.setItem('gudangbat_theme', isDark ? 'dark' : 'light');
       const themeIcon = document.getElementById('theme-icon');
       if (themeIcon) themeIcon.className = isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+    });
+  }
+
+  const formRegister = document.getElementById('form-register');
+  if (formRegister) {
+    formRegister.addEventListener('submit', (e) => {
+      e.preventDefault();
+      performRegistrationProcess();
+    });
+  }
+
+  const btnRefreshPending = document.getElementById('btn-refresh-pending-users');
+  if (btnRefreshPending) {
+    btnRefreshPending.addEventListener('click', () => loadPendingUsersData());
+  }
+
+  const btnSaveRbac = document.getElementById('btn-save-rbac-matrix');
+  if (btnSaveRbac) {
+    btnSaveRbac.addEventListener('click', () => saveRbacMatrix());
+  }
+
+  const btnAddRole = document.getElementById('btn-add-custom-role');
+  if (btnAddRole) {
+    btnAddRole.addEventListener('click', () => {
+      document.getElementById('modal-custom-role')?.classList.add('active');
+    });
+  }
+
+  const formCustomRole = document.getElementById('form-custom-role');
+  if (formCustomRole) {
+    formCustomRole.addEventListener('submit', (e) => {
+      e.preventDefault();
+      addCustomRole();
+    });
+  }
+
+  const formSettings = document.getElementById('form-settings');
+  if (formSettings) {
+    formSettings.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      appState.settings = appState.settings || {};
+      appState.settings.appName = document.getElementById('setting-app-name')?.value.trim() || 'GUDANG BAT';
+      appState.settings.warehouseName = document.getElementById('setting-warehouse-name')?.value.trim() || 'Gudang BAT';
+      appState.settings.companyLogo = document.getElementById('setting-company-logo')?.value.trim() || '';
+      appState.settings.bookingExpiryDays = Number(document.getElementById('setting-booking-expiry')?.value || 3);
+      appState.settings.minStockDefault = Number(document.getElementById('setting-min-stock')?.value || 10);
+      renderCompanyLogo();
+      const saved = await persistAppState('UPDATE_SETTINGS', 'Admin memperbarui pengaturan aplikasi dan logo perusahaan.');
+      if (saved !== false) showToast('Pengaturan aplikasi & logo perusahaan berhasil disimpan!', 'success');
     });
   }
 
@@ -628,7 +844,6 @@ function initEventListeners() {
 
   const workReportForm = document.getElementById('form-gudang-work-report');
   if (workReportForm) workReportForm.addEventListener('submit', submitGudangWorkReport);
-
 
   const payoutForm = document.getElementById('form-payout-request');
   if (payoutForm) payoutForm.addEventListener('submit', submitPayoutRequest);
@@ -674,9 +889,11 @@ function switchView(viewId) {
     'admin-wages': { title: 'Upah Pekerja Gudang', sub: 'Ringkasan kalkulasi pendapatan dan klaim upah pekerja' },
     'admin-payouts': { title: 'Pengajuan Pencairan Upah', sub: 'Persetujuan dan pencairan dana upah hasil kerja gudang' },
     'admin-reports': { title: 'Laporan & Statistik', sub: 'Cetak dan ekspor laporan stok, mutasi, pekerjaan, dan upah' },
+    'admin-pending-users': { title: 'Persetujuan Akun Pendaftaran', sub: 'Tinjau pendaftaran akun pengguna baru dan tentukan hak akses peran' },
+    'admin-roles': { title: 'Hak Akses & Peran (RBAC)', sub: 'Konfigurasi izin matriks modul dan fitur aplikasi untuk setiap peran' },
     'admin-users': { title: 'Pengguna Sistem', sub: 'Kelola akun pengguna, role Admin, Gudang, dan Seller' },
     'admin-activity-logs': { title: 'Log Aktivitas', sub: 'Jejak audit trail seluruh aktivitas pengguna sistem' },
-    'admin-settings': { title: 'Pengaturan Gudang', sub: 'Konfigurasi nama gudang, logo, dan batasan sistem' },
+    'admin-settings': { title: 'Pengaturan Gudang & Logo', sub: 'Konfigurasi nama gudang, logo perusahaan, dan batasan sistem' },
     'admin-profile': { title: 'Profil Admin', sub: 'Kelola foto dan informasi akun administrator' },
     'gudang-dashboard': { title: 'Dashboard Gudang', sub: 'Progres target pekerjaan dan pendapatan upah harian Anda' },
     'gudang-targets': { title: 'Target Hari Ini', sub: 'Target pencapaian pekerjaan gudang yang ditugaskan admin' },
@@ -712,7 +929,7 @@ function refreshCurrentView() {
 }
 
 function refreshViewData(viewId) {
-  updateBadges();
+  updateNotificationBadges();
   switch (viewId) {
     case 'admin-dashboard': renderAdminDashboard(); break;
     case 'admin-products': renderAdminProducts(); break;
@@ -727,6 +944,9 @@ function refreshViewData(viewId) {
     case 'admin-wages': renderAdminWages(); break;
     case 'admin-payouts': renderAdminPayouts(); break;
     case 'admin-reports': renderAdminReports(); break;
+    case 'admin-pending-users': loadPendingUsersData(); break;
+    case 'admin-roles': renderRbacMatrix(); break;
+    case 'admin-settings': renderCompanyLogo(); break;
     case 'admin-users': renderAdminUsers(); break;
     case 'admin-activity-logs': renderAdminActivityLogs(); break;
     case 'admin-profile': renderProfileView(); break;
@@ -744,6 +964,210 @@ function refreshViewData(viewId) {
     case 'seller-booking-history': renderSellerBookingHistory(); break;
     case 'seller-sales-status': renderSellerSalesStatus(); break;
   }
+}
+
+async function loadPendingUsersData() {
+  try {
+    const res = await apiRequest(`${API_BASE}/users/pending`);
+    const pendingUsers = res.data || [];
+    renderPendingUsersList(pendingUsers);
+    updatePendingBadge(pendingUsers.length);
+  } catch (err) {
+    console.warn("Gagal memuat pengguna pending:", err);
+  }
+}
+
+function updateNotificationBadges() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+  const pendingRegistrations = (appState.pendingRegistrations || []).length;
+  updatePendingBadge(pendingRegistrations);
+
+  const pendingBookings = (appState.sellerBookings || []).filter(b => b.status === 'Menunggu Persetujuan').length;
+  const badgeBookings = document.getElementById('badge-admin-bookings');
+  if (badgeBookings) {
+    badgeBookings.textContent = pendingBookings;
+    badgeBookings.classList.toggle('hidden', pendingBookings === 0);
+  }
+
+  const pendingPayouts = (appState.payoutRequests || []).filter(p => p.status === 'Menunggu Persetujuan').length;
+  const badgePayouts = document.getElementById('badge-admin-payouts');
+  if (badgePayouts) {
+    badgePayouts.textContent = pendingPayouts;
+    badgePayouts.classList.toggle('hidden', pendingPayouts === 0);
+  }
+}
+
+function updatePendingBadge(count) {
+  const badge = document.getElementById('badge-admin-pending');
+  if (badge) {
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  }
+}
+
+function renderPendingUsersList(users) {
+  const tbody = document.getElementById('tbody-pending-users-list');
+  if (!tbody) return;
+  if (!users || users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding: 24px;">Tidak ada pendaftaran pengguna baru yang menunggu persetujuan.</td></tr>`;
+    return;
+  }
+
+  const customRoles = appState.customRoles || [];
+
+  tbody.innerHTML = users.map(u => {
+    const registeredDate = u.createdAt ? new Date(u.createdAt).toLocaleString('id-ID') : '-';
+    return `
+      <tr>
+        <td><small class="text-muted">${registeredDate}</small></td>
+        <td><strong>${u.name}</strong></td>
+        <td><code>${u.username}</code></td>
+        <td>${u.email || u.phone || '-'}</td>
+        <td><span class="badge badge-secondary">${u.requestedRole || 'seller'}</span></td>
+        <td>
+          <select id="role-select-${u.id}" class="form-control form-control-sm" style="min-width: 140px;">
+            <option value="seller" ${u.requestedRole === 'seller' ? 'selected' : ''}>Seller / Penjual</option>
+            <option value="gudang" ${u.requestedRole === 'gudang' ? 'selected' : ''}>Pekerja Gudang</option>
+            <option value="admin" ${u.requestedRole === 'admin' ? 'selected' : ''}>Admin Pusat</option>
+            ${customRoles.map(r => `<option value="${r.id}" ${u.requestedRole === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+          </select>
+        </td>
+        <td class="text-right">
+          <button type="button" class="btn btn-success btn-sm" onclick="approvePendingUser('${u.id}')">
+            <i class="fa-solid fa-check"></i> Setujui & Aktifkan
+          </button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="rejectPendingUser('${u.id}')">
+            <i class="fa-solid fa-xmark"></i> Tolak
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function approvePendingUser(userId) {
+  const select = document.getElementById(`role-select-${userId}`);
+  const assignedRole = select ? select.value : 'seller';
+  try {
+    const res = await apiRequest(`${API_BASE}/users/${userId}/approve`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: assignedRole })
+    });
+    showToast(res.message || 'Akun berhasil disetujui.', 'success');
+    await loadPendingUsersData();
+    await syncFetchState(true);
+  } catch (err) {
+    showToast(err.message || 'Gagal menyetujui akun.', 'danger');
+  }
+}
+
+async function rejectPendingUser(userId) {
+  showConfirmDialog('Konfirmasi Penolakan', 'Apakah Anda yakin ingin menolak pendaftaran pengguna ini?', async () => {
+    try {
+      const res = await apiRequest(`${API_BASE}/users/${userId}/reject`, { method: 'PATCH' });
+      showToast(res.message || 'Pendaftaran ditolak.', 'secondary');
+      await loadPendingUsersData();
+      await syncFetchState(true);
+    } catch (err) {
+      showToast(err.message || 'Gagal menolak akun.', 'danger');
+    }
+  });
+}
+
+function renderRbacMatrix() {
+  const tbody = document.getElementById('tbody-rbac-matrix');
+  const thead = document.querySelector('#table-rbac-matrix thead tr');
+  if (!tbody) return;
+
+  ensureStateShape();
+  const customRoles = appState.customRoles || [];
+  const rolesMap = appState.rbac?.rolePermissions || {};
+
+  if (thead) {
+    thead.innerHTML = `
+      <th style="width: 320px;">Modul / Fitur Sistem</th>
+      <th class="text-center">Admin Pusat</th>
+      <th class="text-center">Pekerja Gudang</th>
+      <th class="text-center">Seller / Penjual</th>
+      ${customRoles.map(r => `<th class="text-center">${r.name} <button class="btn-icon text-danger" onclick="deleteCustomRole('${r.id}')" title="Hapus Peran"><i class="fa-solid fa-trash"></i></button></th>`).join('')}
+    `;
+  }
+
+  const allRoleIds = ['admin', 'gudang', 'seller', ...customRoles.map(r => r.id)];
+
+  tbody.innerHTML = ALL_PERMISSIONS.map(p => {
+    return `
+      <tr>
+        <td><strong>${p.label}</strong><br><small class="text-muted"><code>${p.id}</code></small></td>
+        ${allRoleIds.map(roleId => {
+          const isChecked = (rolesMap[roleId] || []).includes(p.id) || roleId === 'admin';
+          const isDisabled = roleId === 'admin';
+          return `
+            <td class="text-center">
+              <input type="checkbox" class="rbac-checkbox" data-role="${roleId}" data-perm="${p.id}" ${isChecked ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}>
+            </td>
+          `;
+        }).join('')}
+      </tr>
+    `;
+  }).join('');
+}
+
+async function saveRbacMatrix() {
+  ensureStateShape();
+  const checkboxes = document.querySelectorAll('.rbac-checkbox');
+  const rolesMap = { admin: ALL_PERMISSIONS.map(p => p.id) };
+
+  checkboxes.forEach(cb => {
+    const roleId = cb.getAttribute('data-role');
+    const permId = cb.getAttribute('data-perm');
+    if (!rolesMap[roleId]) rolesMap[roleId] = [];
+    if (cb.checked && !rolesMap[roleId].includes(permId)) {
+      rolesMap[roleId].push(permId);
+    }
+  });
+
+  appState.rbac.rolePermissions = rolesMap;
+  const saved = await persistAppState('UPDATE_RBAC', 'Admin memperbarui matriks hak akses peran.');
+  if (saved !== false) showToast('Matriks hak akses peran berhasil diperbarui!', 'success');
+}
+
+async function addCustomRole() {
+  const name = document.getElementById('role-name-input')?.value.trim();
+  const id = document.getElementById('role-id-input')?.value.trim().toLowerCase().replace(/\s+/g, '_');
+  const desc = document.getElementById('role-desc-input')?.value.trim();
+
+  if (!name || !id) return showToast('Nama dan ID peran wajib diisi.', 'warning');
+
+  ensureStateShape();
+  if (['admin', 'gudang', 'seller'].includes(id) || appState.customRoles.some(r => r.id === id)) {
+    return showToast('ID Peran sudah digunakan. Pilih ID lain.', 'danger');
+  }
+
+  appState.customRoles.push({ id, name, desc });
+  appState.rbac.rolePermissions[id] = ['dashboard.view', 'stocks.view'];
+
+  const saved = await persistAppState('ADD_CUSTOM_ROLE', `Admin menambahkan peran kustom baru: ${name} (${id}).`);
+  if (saved !== false) {
+    showToast(`Peran kustom '${name}' berhasil ditambahkan!`, 'success');
+    document.getElementById('modal-custom-role')?.classList.remove('active');
+    document.getElementById('form-custom-role')?.reset();
+    renderRbacMatrix();
+  }
+}
+
+async function deleteCustomRole(roleId) {
+  showConfirmDialog('Hapus Peran', 'Apakah Anda yakin ingin menghapus peran kustom ini?', async () => {
+    ensureStateShape();
+    appState.customRoles = (appState.customRoles || []).filter(r => r.id !== roleId);
+    delete appState.rbac.rolePermissions[roleId];
+    const saved = await persistAppState('DELETE_CUSTOM_ROLE', `Admin menghapus peran kustom '${roleId}'.`);
+    if (saved !== false) {
+      showToast('Peran kustom berhasil dihapus.', 'secondary');
+      renderRbacMatrix();
+    }
+  });
 }
 
 function updateBadges() {
