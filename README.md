@@ -46,3 +46,11 @@ Untuk Railway: buat Project -> PostgreSQL -> Deploy from GitHub -> isi `JWT_SECR
 
 ## Tahap 7.3 Safe Sync
 Versi ini menambahkan snapshot otomatis, blokir overwrite state kosong/pengurangan massal, pemulihan snapshot khusus admin, dan perbaikan pemuatan state setelah login.
+
+
+## Tahap 10 — Audit Keamanan & Hak Akses
+- Backend memperketat akses baca dashboard, inventaris, mutasi, upah, dan jenis pekerjaan.
+- Hak akses frontend tidak lagi bergantung hanya pada role Gudang/Seller untuk beberapa aksi utama.
+- Ditambahkan security log untuk jejak mutasi API.
+- Respons API diberi no-store untuk mengurangi data sensitif tersimpan cache browser.
+- Perbaikan duplikasi return pada mutateState.

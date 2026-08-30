@@ -18,13 +18,56 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-function publicUser(u) { return { id:u.id, username:u.username, name:u.name, role:u.role, email:u.email || '', phone:u.phone || '', status:u.status }; }
-function auth(req,res,next) {
-  const h=req.headers.authorization||''; const token=h.startsWith('Bearer ')?h.slice(7):null;
-  if(!token) return res.status(401).json({success:false,message:'Sesi tidak ditemukan. Silakan login kembali.'});
-  try { req.user=jwt.verify(token,JWT_SECRET); next(); } catch { return res.status(401).json({success:false,message:'Sesi tidak valid atau sudah berakhir.'}); }
+app.use((req,res,next)=>{
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control','no-store');
+  next();
+});
+
+function requireAnyPermission(...permissions) {
+  return (req,res,next) => {
+    const p=req.user?.permissions || [];
+    if (req.user?.role==='admin' || p.includes('*') || permissions.some(x=>p.includes(x))) return next();
+    return res.status(403).json({success:false,message:'Hak akses Anda tidak mencakup tindakan ini.'});
+  };
 }
 
+async function writeSecurityLog(userId, action, detail, req) {
+  try { await pool.query(`INSERT INTO security_logs(user_id,action,detail,ip,user_agent) VALUES($1,$2,$3,$4,$5)`,[userId||null,String(action),String(detail||''),String(req.ip||''),String(req.get('user-agent')||'').slice(0,500)]); } catch(e) {}
+}
+
+function publicUser(u) { return { id:u.id, username:u.username, name:u.name, role:u.role, email:u.email || '', phone:u.phone || '', status:u.status, requestedRole:u.requested_role || u.requestedRole || '', permissions:Array.isArray(u.permissions)?u.permissions:(u.permissions||[]) }; }
+const DEFAULT_ROLE_PERMISSIONS = {
+  admin: ['*'],
+  gudang: ['dashboard.view','stocks.view','inventory.qc','work.reports','wages.manage'],
+  seller: ['dashboard.view','stocks.view','seller.booking','sales.closing']
+};
+async function getRolePermissions(role) {
+  try {
+    const r = await pool.query('SELECT state FROM app_state WHERE id=1');
+    const map = r.rows[0]?.state?.rbac?.rolePermissions || {};
+    return map[role] || DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard.view'];
+  } catch { return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard.view']; }
+}
+async function auth(req,res,next) {
+  const h=req.headers.authorization||''; const token=h.startsWith('Bearer ')?h.slice(7):null;
+  if(!token) return res.status(401).json({success:false,message:'Sesi tidak ditemukan. Silakan login kembali.'});
+  try {
+    const decoded=jwt.verify(token,JWT_SECRET);
+    const r=await pool.query('SELECT id,username,name,role,email,phone,status,permissions FROM users WHERE id=$1 LIMIT 1',[decoded.id]);
+    const u=r.rows[0];
+    if(!u || u.status!=='active') return res.status(401).json({success:false,message:'Akun sudah tidak aktif. Silakan login kembali.'});
+    const rolePermissions=await getRolePermissions(u.role);
+    const permissions=(Array.isArray(u.permissions)&&u.permissions.length?u.permissions:rolePermissions);
+    req.user={...publicUser(u), permissions}; next();
+  } catch { return res.status(401).json({success:false,message:'Sesi tidak valid atau sudah berakhir.'}); }
+}
+function requirePermission(permission) {
+  return (req,res,next) => {
+    const p=req.user?.permissions || [];
+    if(req.user?.role==='admin' || p.includes('*') || p.includes(permission)) return next();
+    return res.status(403).json({success:false,message:'Hak akses Anda tidak mencakup tindakan ini.'});
+  };
+}
 
 function requireRole(...roles) {
   return (req,res,next) => {
@@ -108,8 +151,8 @@ app.post('/api/register', async (req,res)=>{
     const status = 'pending';
 
     await pool.query(
-      `INSERT INTO users(id, username, password_hash, name, role, email, phone, status) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [userId, uName, hash, fullName, userRole, String(email || '').trim() || null, String(phone || '').trim() || null, status]
+      `INSERT INTO users(id, username, password_hash, name, role, email, phone, status, requested_role, permissions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+      [userId, uName, hash, fullName, userRole, String(email || '').trim() || null, String(phone || '').trim() || null, status, String(requestedRole || 'seller'), JSON.stringify([])]
     );
 
     // Tambahkan log pendaftaran ke state
@@ -160,17 +203,19 @@ app.post('/api/login', async (req,res)=>{
 
 app.get('/api/users/pending', auth, requireRole('admin'), async (req,res)=>{
   try {
-    const r = await pool.query("SELECT id,username,name,role,email,phone,status,created_at FROM users WHERE status='pending' ORDER BY created_at DESC");
-    res.json({success:true, data: r.rows.map(publicUser)});
+    const r = await pool.query("SELECT id,username,name,role,email,phone,status,requested_role,created_at FROM users WHERE status='pending' ORDER BY created_at DESC");
+    res.json({success:true, data: r.rows.map(u => ({...publicUser(u), requestedRole:u.requested_role || 'seller', createdAt:u.created_at}))});
   } catch(e){ res.status(500).json({success:false,message:'Gagal mengambil daftar pengguna pending.'}); }
 });
 
 app.patch('/api/users/:id/approve', auth, requireRole('admin'), async (req,res)=>{
   try {
-    const { role } = req.body || {};
+    const { role, permissions } = req.body || {};
     const assignedRole = String(role || 'seller').trim();
     const userId = req.params.id;
-    const r = await pool.query("UPDATE users SET status='active', role=$1, updated_at=NOW() WHERE id=$2 RETURNING id,username,name,role,status", [assignedRole, userId]);
+    const rolePermissions = await getRolePermissions(assignedRole);
+    const assignedPermissions = Array.isArray(permissions) ? permissions : rolePermissions;
+    const r = await pool.query("UPDATE users SET status='active', role=$1, requested_role=NULL, permissions=$2::jsonb, updated_at=NOW() WHERE id=$3 RETURNING id,username,name,role,status,permissions", [assignedRole, JSON.stringify(assignedPermissions), userId]);
     if (!r.rowCount) return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'});
     const u = r.rows[0];
     await mutateState((state) => {
@@ -222,6 +267,60 @@ app.patch('/api/users/:id/role', auth, requireRole('admin'), async (req,res)=>{
   } catch(e){ res.status(500).json({success:false,message:'Gagal memperbarui pengguna.'}); }
 });
 
+
+// Admin: manajemen pengguna individual (Tahap 9)
+app.get('/api/users', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const r=await pool.query("SELECT id,username,name,role,email,phone,status,requested_role,permissions,created_at,updated_at FROM users ORDER BY created_at DESC");
+    res.json({success:true,data:r.rows.map(u=>({...publicUser(u),requestedRole:u.requested_role||'',createdAt:u.created_at,updatedAt:u.updated_at}))});
+  } catch(e){ console.error('GET users',e); res.status(500).json({success:false,message:'Gagal mengambil daftar pengguna.'}); }
+});
+
+app.post('/api/users', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const {name,username,password,role='seller',email='',phone='',permissions,status='active'}=req.body||{};
+    if(!name||!username||!password) return res.status(400).json({success:false,message:'Nama, username, dan password wajib diisi.'});
+    const exists=await pool.query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1',[String(username).trim()]);
+    if(exists.rowCount) return res.status(409).json({success:false,message:'Username sudah digunakan.'});
+    const rolePerms=await getRolePermissions(String(role));
+    const assigned=Array.isArray(permissions)?permissions:rolePerms;
+    const hash=await bcrypt.hash(String(password),10); const id='USR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+    const r=await pool.query(`INSERT INTO users(id,username,password_hash,name,role,email,phone,status,permissions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id,username,name,role,email,phone,status,permissions,created_at,updated_at`,[id,String(username).trim(),hash,String(name).trim(),String(role),String(email).trim(),String(phone).trim(),String(status),JSON.stringify(assigned)]);
+    res.status(201).json({success:true,message:'Akun pengguna berhasil dibuat.',data:{...publicUser(r.rows[0]),createdAt:r.rows[0].created_at,updatedAt:r.rows[0].updated_at}});
+  } catch(e){ console.error('POST users',e); res.status(500).json({success:false,message:'Gagal membuat akun pengguna.'}); }
+});
+
+app.patch('/api/users/:id', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const id=req.params.id, body=req.body||{}; const old=await pool.query('SELECT * FROM users WHERE id=$1',[id]);
+    if(!old.rowCount)return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'}); const u=old.rows[0];
+    const username=body.username!==undefined?String(body.username).trim():u.username;
+    const dup=await pool.query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND id<>$2 LIMIT 1',[username,id]); if(dup.rowCount)return res.status(409).json({success:false,message:'Username sudah digunakan.'});
+    const role=body.role!==undefined?String(body.role):u.role; const status=body.status!==undefined?String(body.status):u.status;
+    const perms=Array.isArray(body.permissions)?body.permissions:(Array.isArray(u.permissions)?u.permissions:[]);
+    const fields=[`username=$1`,`name=$2`,`role=$3`,`email=$4`,`phone=$5`,`status=$6`,`permissions=$7::jsonb`,`updated_at=NOW()`];
+    const vals=[username,body.name!==undefined?String(body.name).trim():u.name,role,body.email!==undefined?String(body.email).trim():u.email||'',body.phone!==undefined?String(body.phone).trim():u.phone||'',status,JSON.stringify(perms),id];
+    if(body.password){ fields.push(`password_hash=$${vals.length}`); vals.splice(vals.length-1,0,await bcrypt.hash(String(body.password),10)); }
+    const idPos=vals.length; const q=`UPDATE users SET ${fields.join(', ')} WHERE id=$${idPos} RETURNING id,username,name,role,email,phone,status,permissions,created_at,updated_at`;
+    const r=await pool.query(q,vals); res.json({success:true,message:'Akun pengguna berhasil diperbarui.',data:{...publicUser(r.rows[0]),createdAt:r.rows[0].created_at,updatedAt:r.rows[0].updated_at}});
+  } catch(e){ console.error('PATCH users',e); res.status(500).json({success:false,message:'Gagal memperbarui akun pengguna.'}); }
+});
+
+app.delete('/api/users/:id', auth, requireRole('admin'), async (req,res)=>{
+  try { if(req.params.id===req.user.id)return res.status(400).json({success:false,message:'Akun yang sedang digunakan tidak dapat dihapus.'}); const r=await pool.query('DELETE FROM users WHERE id=$1 RETURNING id,name,username',[req.params.id]); if(!r.rowCount)return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'}); res.json({success:true,message:`Akun ${r.rows[0].name} berhasil dihapus.`}); } catch(e){res.status(500).json({success:false,message:'Gagal menghapus akun pengguna.'});}
+});
+
+app.get('/api/me', auth, async (req,res)=>{ res.json({success:true,user:req.user}); });
+app.get('/api/me/permissions', auth, async (req,res)=>{ res.json({success:true,data:{role:req.user.role,permissions:req.user.permissions||[]}}); });
+app.patch('/api/users/:id/permissions', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const permissions=Array.isArray(req.body?.permissions)?req.body.permissions:[];
+    const r=await pool.query('UPDATE users SET permissions=$1::jsonb, updated_at=NOW() WHERE id=$2 RETURNING id,username,name,role,permissions',[JSON.stringify(permissions),req.params.id]);
+    if(!r.rowCount)return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'});
+    res.json({success:true,message:'Hak akses pengguna berhasil diperbarui.',data:publicUser(r.rows[0])});
+  }catch(e){res.status(500).json({success:false,message:'Gagal memperbarui hak akses pengguna.'});}
+});
+
 app.get('/api/sync/version', auth, async (req,res)=>{
   try {
     const r = await pool.query('SELECT version, updated_at FROM app_state WHERE id=1');
@@ -229,7 +328,7 @@ app.get('/api/sync/version', auth, async (req,res)=>{
   } catch(e) { res.status(500).json({success:false,message:'Gagal memeriksa versi sinkronisasi.'}); }
 });
 
-app.get('/api/dashboard/summary', auth, async (req,res)=>{
+app.get('/api/dashboard/summary', auth, requirePermission('dashboard.view'), async (req,res)=>{
   try {
     const {state,version}=await getState(pool);
     const start=req.query.start ? new Date(req.query.start) : null;
@@ -270,7 +369,7 @@ app.get('/api/categories', auth, async (req,res)=>{
   try { const {state}=await getState(pool); res.json({success:true,data:state.categories||[]}); }
   catch(e){ console.error(e); res.status(500).json({success:false,message:'Gagal memuat kategori.'}); }
 });
-app.post('/api/categories', auth, requireRole('admin'), async (req,res)=>{
+app.post('/api/categories', auth, requirePermission('products.manage'), async (req,res)=>{
   try {
     const name=String(req.body?.name||'').trim(), description=String(req.body?.description||'').trim();
     if(!name) return res.status(400).json({success:false,message:'Nama kategori wajib diisi.'});
@@ -283,18 +382,18 @@ app.post('/api/categories', auth, requireRole('admin'), async (req,res)=>{
     res.status(201).json({success:true,message:'Kategori berhasil ditambahkan.',data:result,version});
   } catch(e){ res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah kategori.'}); }
 });
-app.put('/api/categories/:id', auth, requireRole('admin'), async (req,res)=>{
+app.put('/api/categories/:id', auth, requirePermission('products.manage'), async (req,res)=>{
   try { const name=String(req.body?.name||'').trim(), description=String(req.body?.description||'').trim(); if(!name)return res.status(400).json({success:false,message:'Nama kategori wajib diisi.'});
     const {result,version}=await mutateState(state=>{ state.categories=state.categories||[]; const c=state.categories.find(x=>x.id===req.params.id); if(!c) throw Object.assign(new Error('Kategori tidak ditemukan.'),{status:404}); if(state.categories.some(x=>x.id!==c.id&&String(x.name).toLowerCase()===name.toLowerCase()))throw Object.assign(new Error('Nama kategori sudah digunakan.'),{status:409}); Object.assign(c,{name,description,updatedAt:new Date().toISOString()}); return c; });
     res.json({success:true,message:'Kategori berhasil diperbarui.',data:result,version});
   } catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui kategori.'});}
 });
-app.delete('/api/categories/:id', auth, requireRole('admin'), async (req,res)=>{
+app.delete('/api/categories/:id', auth, requirePermission('products.manage'), async (req,res)=>{
   try { const {result,version}=await mutateState(state=>{ state.categories=state.categories||[]; state.products=state.products||[]; const c=state.categories.find(x=>x.id===req.params.id); if(!c)throw Object.assign(new Error('Kategori tidak ditemukan.'),{status:404}); if(state.products.some(p=>p.categoryId===c.id))throw Object.assign(new Error('Kategori masih digunakan oleh produk dan tidak dapat dihapus.'),{status:409}); state.categories=state.categories.filter(x=>x.id!==c.id); return c; }); res.json({success:true,message:'Kategori berhasil dihapus.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menghapus kategori.'});}
 });
 app.get('/api/products', auth, async (req,res)=>{ try{const {state}=await getState(pool);res.json({success:true,data:state.products||[]});}catch(e){res.status(500).json({success:false,message:'Gagal memuat produk.'});} });
-app.post('/api/products', auth, requireRole('admin'), async (req,res)=>{
+app.post('/api/products', auth, requirePermission('products.manage'), async (req,res)=>{
   try { const payload=req.body||{}; const {result,version}=await mutateState(state=>{
     state.products=state.products||[]; state.categories=state.categories||[]; state.inventory=state.inventory||[];
     const name=String(payload.name||'').trim(), sku=String(payload.sku||'').trim(), categoryId=String(payload.categoryId||'');
@@ -306,7 +405,7 @@ app.post('/api/products', auth, requireRole('admin'), async (req,res)=>{
   }); res.status(201).json({success:true,message:'Produk berhasil ditambahkan.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah produk.'});}
 });
-app.put('/api/products/:id', auth, requireRole('admin'), async (req,res)=>{
+app.put('/api/products/:id', auth, requirePermission('products.manage'), async (req,res)=>{
   try { const payload=req.body||{}; const {result,version}=await mutateState(state=>{
     state.products=state.products||[]; state.categories=state.categories||[]; state.inventory=state.inventory||[]; const p=state.products.find(x=>x.id===req.params.id); if(!p)throw Object.assign(new Error('Produk tidak ditemukan.'),{status:404});
     const name=String(payload.name||'').trim(), sku=String(payload.sku||'').trim(), categoryId=String(payload.categoryId||''); if(!name||!sku||!categoryId)throw Object.assign(new Error('Nama produk, kategori dan SKU wajib diisi.'),{status:400}); if(!state.categories.some(c=>c.id===categoryId))throw Object.assign(new Error('Kategori tidak ditemukan.'),{status:400}); if(state.products.some(x=>x.id!==p.id&&String(x.sku).toLowerCase()===sku.toLowerCase()))throw Object.assign(new Error('SKU produk sudah digunakan.'),{status:409});
@@ -314,7 +413,7 @@ app.put('/api/products/:id', auth, requireRole('admin'), async (req,res)=>{
   }); res.json({success:true,message:'Produk berhasil diperbarui.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui produk.'});}
 });
-app.delete('/api/products/:id', auth, requireRole('admin'), async (req,res)=>{
+app.delete('/api/products/:id', auth, requirePermission('products.manage'), async (req,res)=>{
   try { const {result,version}=await mutateState(state=>{ state.products=state.products||[]; state.inventory=state.inventory||[]; const p=state.products.find(x=>x.id===req.params.id); if(!p)throw Object.assign(new Error('Produk tidak ditemukan.'),{status:404}); state.products=state.products.filter(x=>x.id!==p.id); state.inventory=state.inventory.filter(i=>i.productId!==p.id); return p; }); res.json({success:true,message:'Produk berhasil dihapus.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menghapus produk.'});}
 });
@@ -362,21 +461,21 @@ function addStockMutation(state, payload) {
   });
 }
 
-app.get('/api/inventory', auth, async (req,res) => {
+app.get('/api/inventory', auth, requireAnyPermission('stocks.view','inventory.in_out','inventory.qc'), async (req,res) => {
   try {
     const {state, version} = await getState(pool);
     res.json({success:true, data: state.inventory || [], version});
   } catch(e) { res.status(500).json({success:false,message:'Gagal mengambil data inventaris.'}); }
 });
 
-app.get('/api/inventory/movements', auth, async (req,res) => {
+app.get('/api/inventory/movements', auth, requireAnyPermission('stocks.view','inventory.in_out','inventory.qc'), async (req,res) => {
   try {
     const {state, version} = await getState(pool);
     res.json({success:true, data: state.stockMutations || [], version});
   } catch(e) { res.status(500).json({success:false,message:'Gagal mengambil riwayat mutasi stok.'}); }
 });
 
-app.post('/api/inventory/in', auth, requireRole('admin'), async (req,res) => {
+app.post('/api/inventory/in', auth, requirePermission('inventory.in_out'), async (req,res) => {
   try {
     const payload = req.body || {};
     const {result, version} = await mutateState((state) => {
@@ -398,7 +497,7 @@ app.post('/api/inventory/in', auth, requireRole('admin'), async (req,res) => {
   } catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mencatat barang masuk.'});}
 });
 
-app.post('/api/inventory/out', auth, requireRole('admin'), async (req,res) => {
+app.post('/api/inventory/out', auth, requirePermission('inventory.in_out'), async (req,res) => {
   try {
     const payload=req.body||{};
     const {result,version}=await mutateState((state)=>{
@@ -420,7 +519,7 @@ app.post('/api/inventory/out', auth, requireRole('admin'), async (req,res) => {
   } catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mencatat barang keluar.'});}
 });
 
-app.post('/api/inventory/qc', auth, requireRole('admin','gudang'), async (req,res) => {
+app.post('/api/inventory/qc', auth, requirePermission('inventory.qc'), async (req,res) => {
   try {
     const payload=req.body||{};
     const {result,version}=await mutateState((state)=>{
@@ -437,7 +536,7 @@ app.post('/api/inventory/qc', auth, requireRole('admin','gudang'), async (req,re
   } catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan hasil QC.'});}
 });
 
-app.post('/api/inventory/defect', auth, requireRole('admin','gudang'), async (req,res) => {
+app.post('/api/inventory/defect', auth, requirePermission('inventory.qc'), async (req,res) => {
   try {
     const payload=req.body||{};
     const {result,version}=await mutateState((state)=>{
@@ -455,7 +554,7 @@ app.post('/api/inventory/defect', auth, requireRole('admin','gudang'), async (re
   } catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mencatat barang cacat.'});}
 });
 
-app.post('/api/inventory/return', auth, requireRole('admin'), async (req,res) => {
+app.post('/api/inventory/return', auth, requirePermission('inventory.qc'), async (req,res) => {
   try {
     const payload=req.body||{};
     const {result,version}=await mutateState((state)=>{
@@ -479,15 +578,15 @@ function calculateWorkerBalance(state, workerId) {
   const paid=(state.payoutRequests||[]).filter(p=>p.workerId===workerId && p.status==='Sudah Dibayar').reduce((a,p)=>a+Number(p.amount||0),0);
   return {earned,reserved,paid,available:Math.max(0,earned-reserved-paid)};
 }
-app.get('/api/work-types', auth, async (req,res)=>{try{const {state}=await getState(pool);res.json({success:true,data:state.workTypes||[]});}catch(e){res.status(500).json({success:false,message:'Gagal memuat jenis pekerjaan.'});}});
-app.post('/api/work-types', auth, requireRole('admin'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];if(state.workTypes.some(x=>String(x.name).toLowerCase()===name.toLowerCase()))throw Object.assign(new Error('Jenis pekerjaan sudah ada.'),{status:409});const now=new Date().toISOString();const item={id:'WRK-'+Date.now(),name,defaultRate:rate,description,createdAt:now,updatedAt:now};state.workTypes.push(item);state.activityLogs=state.activityLogs||[];state.activityLogs.unshift({id:'ACT-'+Date.now(),type:'TAMBAH_JENIS_PEKERJAAN',description:`Menambahkan ${name} dengan tarif ${rate}`,userId:req.user.id,createdAt:now});return item;});res.status(201).json({success:true,message:'Jenis pekerjaan berhasil ditambahkan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah jenis pekerjaan.'});}});
-app.put('/api/work-types/:id', auth, requireRole('admin'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});Object.assign(item,{name,defaultRate:rate,description,updatedAt:new Date().toISOString()});return item;});res.json({success:true,message:'Jenis pekerjaan berhasil diperbarui.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui jenis pekerjaan.'});}});
-app.delete('/api/work-types/:id', auth, requireRole('admin'), async (req,res)=>{try{const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});state.workTypes=state.workTypes.filter(x=>x.id!==item.id);return item;});res.json({success:true,message:'Jenis pekerjaan berhasil dihapus.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menghapus jenis pekerjaan.'});}});
+app.get('/api/work-types', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);res.json({success:true,data:state.workTypes||[]});}catch(e){res.status(500).json({success:false,message:'Gagal memuat jenis pekerjaan.'});}});
+app.post('/api/work-types', auth, requirePermission('wages.manage'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];if(state.workTypes.some(x=>String(x.name).toLowerCase()===name.toLowerCase()))throw Object.assign(new Error('Jenis pekerjaan sudah ada.'),{status:409});const now=new Date().toISOString();const item={id:'WRK-'+Date.now(),name,defaultRate:rate,description,createdAt:now,updatedAt:now};state.workTypes.push(item);state.activityLogs=state.activityLogs||[];state.activityLogs.unshift({id:'ACT-'+Date.now(),type:'TAMBAH_JENIS_PEKERJAAN',description:`Menambahkan ${name} dengan tarif ${rate}`,userId:req.user.id,createdAt:now});return item;});res.status(201).json({success:true,message:'Jenis pekerjaan berhasil ditambahkan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah jenis pekerjaan.'});}});
+app.put('/api/work-types/:id', auth, requirePermission('wages.manage'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});Object.assign(item,{name,defaultRate:rate,description,updatedAt:new Date().toISOString()});return item;});res.json({success:true,message:'Jenis pekerjaan berhasil diperbarui.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui jenis pekerjaan.'});}});
+app.delete('/api/work-types/:id', auth, requirePermission('wages.manage'), async (req,res)=>{try{const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});state.workTypes=state.workTypes.filter(x=>x.id!==item.id);return item;});res.json({success:true,message:'Jenis pekerjaan berhasil dihapus.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menghapus jenis pekerjaan.'});}});
 app.get('/api/work-reports', auth, async (req,res)=>{try{const {state}=await getState(pool);let data=state.workReports||[];if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat laporan pekerjaan.'});}});
-app.post('/api/work-reports', auth, requireRole('gudang'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const wt=(state.workTypes||[]).find(x=>x.id===String(p.workTypeId||''));const product=(state.products||[]).find(x=>x.id===String(p.productId||''));const variant=(product?.variants||[]).find(x=>x.id===String(p.variantId||''));const qty=Number(p.qty||0);if(!wt||!product||!variant||qty<=0)throw Object.assign(new Error('Data laporan pekerjaan tidak lengkap.'),{status:400});const rate=Number(wt.defaultRate||wt.ratePerUnit||0);if(rate<=0)throw Object.assign(new Error('Tarif pekerjaan belum ditentukan.'),{status:409});state.workReports=state.workReports||[];const now=new Date().toISOString();const item={id:'RPT-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),workTypeId:wt.id,workTypeName:wt.name,productId:product.id,productName:product.name,variantId:variant.id,variantName:variant.name,qty,condition:String(p.condition||'Lolos'),note:String(p.note||''),ratePerUnit:rate,totalWage:rate*qty,createdAt:now};state.workReports.unshift(item);return item;});res.status(201).json({success:true,message:'Laporan pekerjaan berhasil disimpan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan laporan pekerjaan.'});}});
-app.get('/api/wages/me', auth, requireRole('gudang'), async (req,res)=>{try{const {state}=await getState(pool);res.json({success:true,data:calculateWorkerBalance(state,req.user.id)});}catch(e){res.status(500).json({success:false,message:'Gagal memuat saldo upah.'});}});
-app.get('/api/wage-withdrawals', auth, async (req,res)=>{try{const {state}=await getState(pool);let data=state.payoutRequests||[];if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat pengajuan pencairan.'});}});
-app.post('/api/wage-withdrawals', auth, requireRole('gudang'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const amount=Number(p.amount||0);if(amount<=0||!p.paymentMethod||!p.accountNo)throw Object.assign(new Error('Data pencairan tidak lengkap.'),{status:400});const bal=calculateWorkerBalance(state,req.user.id);if(amount>bal.available)throw Object.assign(new Error(`Nominal melebihi saldo tersedia (${bal.available}).`),{status:409});state.payoutRequests=state.payoutRequests||[];const now=new Date().toISOString();const item={id:'PAY-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),amount,paymentMethod:String(p.paymentMethod),accountNo:String(p.accountNo),note:String(p.note||''),status:'Menunggu Persetujuan',createdAt:now};state.payoutRequests.unshift(item);return item;});res.status(201).json({success:true,message:'Pengajuan pencairan berhasil dikirim.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mengajukan pencairan.'});}});
+app.post('/api/work-reports', auth, requirePermission('work.reports'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const wt=(state.workTypes||[]).find(x=>x.id===String(p.workTypeId||''));const product=(state.products||[]).find(x=>x.id===String(p.productId||''));const variant=(product?.variants||[]).find(x=>x.id===String(p.variantId||''));const qty=Number(p.qty||0);if(!wt||!product||!variant||qty<=0)throw Object.assign(new Error('Data laporan pekerjaan tidak lengkap.'),{status:400});const rate=Number(wt.defaultRate||wt.ratePerUnit||0);if(rate<=0)throw Object.assign(new Error('Tarif pekerjaan belum ditentukan.'),{status:409});state.workReports=state.workReports||[];const now=new Date().toISOString();const item={id:'RPT-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),workTypeId:wt.id,workTypeName:wt.name,productId:product.id,productName:product.name,variantId:variant.id,variantName:variant.name,qty,condition:String(p.condition||'Lolos'),note:String(p.note||''),ratePerUnit:rate,totalWage:rate*qty,createdAt:now};state.workReports.unshift(item);return item;});res.status(201).json({success:true,message:'Laporan pekerjaan berhasil disimpan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan laporan pekerjaan.'});}});
+app.get('/api/wages/me', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);res.json({success:true,data:calculateWorkerBalance(state,req.user.id)});}catch(e){res.status(500).json({success:false,message:'Gagal memuat saldo upah.'});}});
+app.get('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);let data=state.payoutRequests||[];if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat pengajuan pencairan.'});}});
+app.post('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const amount=Number(p.amount||0);if(amount<=0||!p.paymentMethod||!p.accountNo)throw Object.assign(new Error('Data pencairan tidak lengkap.'),{status:400});const bal=calculateWorkerBalance(state,req.user.id);if(amount>bal.available)throw Object.assign(new Error(`Nominal melebihi saldo tersedia (${bal.available}).`),{status:409});state.payoutRequests=state.payoutRequests||[];const now=new Date().toISOString();const item={id:'PAY-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),amount,paymentMethod:String(p.paymentMethod),accountNo:String(p.accountNo),note:String(p.note||''),status:'Menunggu Persetujuan',createdAt:now};state.payoutRequests.unshift(item);return item;});res.status(201).json({success:true,message:'Pengajuan pencairan berhasil dikirim.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mengajukan pencairan.'});}});
 async function updateWithdrawal(req,res,status){try{const {result,version}=await mutateState((state)=>{state.payoutRequests=state.payoutRequests||[];const item=state.payoutRequests.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Pengajuan tidak ditemukan.'),{status:404});if(status==='Disetujui'&&item.status!=='Menunggu Persetujuan')throw Object.assign(new Error('Status pengajuan tidak dapat disetujui.'),{status:409});if(status==='Ditolak'&&item.status!=='Menunggu Persetujuan')throw Object.assign(new Error('Status pengajuan tidak dapat ditolak.'),{status:409});if(status==='Sudah Dibayar'&&item.status!=='Disetujui')throw Object.assign(new Error('Pengajuan harus disetujui terlebih dahulu.'),{status:409});item.status=status;if(status==='Disetujui')item.approvedBy=req.user.username;if(status==='Sudah Dibayar')item.paidAt=new Date().toISOString();if(status==='Ditolak')item.rejectedBy=req.user.username;return item;});res.json({success:true,message:`Pengajuan berhasil ${status.toLowerCase()}.`,data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui pengajuan.'});}}
 app.patch('/api/wage-withdrawals/:id/approve', auth, requireRole('admin'), (req,res)=>updateWithdrawal(req,res,'Disetujui'));
 app.patch('/api/wage-withdrawals/:id/reject', auth, requireRole('admin'), (req,res)=>updateWithdrawal(req,res,'Ditolak'));
@@ -505,7 +604,7 @@ app.get('/api/sales-closings', auth, async (req,res)=>{
   } catch(e){ res.status(500).json({success:false,message:'Gagal memuat data closing penjualan.'}); }
 });
 
-app.post('/api/resi/scan', auth, requireRole('admin'), async (req,res)=>{
+app.post('/api/resi/scan', auth, requirePermission('sales.closing'), async (req,res)=>{
   try {
     const resiNo=String(req.body?.resiNo||'').trim();
     if(!resiNo) return res.status(400).json({success:false,message:'Nomor resi wajib diisi atau dipindai.'});
@@ -523,7 +622,7 @@ app.post('/api/resi/scan', auth, requireRole('admin'), async (req,res)=>{
   } catch(e){ res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan hasil scan resi.'}); }
 });
 
-app.post('/api/sales-closings', auth, requireRole('admin'), async (req,res)=>{
+app.post('/api/sales-closings', auth, requirePermission('sales.closing'), async (req,res)=>{
   try {
     const payload=req.body||{};
     const resiNo=String(payload.resiNo||'').trim();
@@ -618,12 +717,21 @@ app.post('/api/state-snapshots/:id/restore', auth, requireRole('admin'), async (
   finally{client.release();}
 });
 
+
+app.use('/api', (req,res,next) => {
+  if (req.user && !['GET','OPTIONS'].includes(req.method)) writeSecurityLog(req.user.id, `${req.method} ${req.path}`, 'API mutation', req);
+  next();
+});
+
 app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Endpoint API tidak ditemukan.'}));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 async function bootstrap(){
-  await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', requested_role text, permissions jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS security_logs (id bigserial PRIMARY KEY, user_id text, action text NOT NULL, detail text, ip text, user_agent text, created_at timestamptz NOT NULL DEFAULT now());`);
   try { await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;`); } catch(e){}
+  try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_role text;`); } catch(e){}
+  try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '[]'::jsonb;`); } catch(e){}
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state (id integer PRIMARY KEY CHECK(id=1), state jsonb NOT NULL DEFAULT '{}'::jsonb, version bigint NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now());`);
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state_snapshots (id bigserial PRIMARY KEY, state jsonb NOT NULL, source_version bigint NOT NULL, reason text NOT NULL, user_id text NULL, created_at timestamptz NOT NULL DEFAULT now());`);
   const exists=await pool.query('SELECT 1 FROM app_state WHERE id=1');
@@ -636,3 +744,12 @@ async function bootstrap(){
   app.listen(PORT,'0.0.0.0',()=>console.log(`GUDANG BAT online server berjalan di port ${PORT}`));
 }
 bootstrap().catch(e=>{console.error('Gagal bootstrap:',e);process.exit(1)});
+
+// Public branding endpoint: allows the login screen to show the company logo without authentication.
+app.get('/api/public/settings', async (req,res)=>{
+  try {
+    const r=await pool.query('SELECT state FROM app_state WHERE id=1');
+    const settings=r.rows[0]?.state?.settings || {};
+    res.json({success:true,data:{appName:settings.appName||'GUDANG BAT',warehouseName:settings.warehouseName||'',companyLogo:settings.companyLogo||''}});
+  } catch(e){res.status(500).json({success:false,message:'Gagal memuat identitas perusahaan.'});}
+});
