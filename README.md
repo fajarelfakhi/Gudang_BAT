@@ -42,3 +42,7 @@ Untuk Railway: buat Project -> PostgreSQL -> Deploy from GitHub -> isi `JWT_SECR
 - Tombol edit/hapus produk dan edit pengguna diperbaiki.
 - Scanner resi mendukung kamera browser (BarcodeDetector bila tersedia) dengan fallback input manual.
 - Dashboard menyediakan akses cepat Booking, Pengajuan Upah, Scan Resi, dan grafik statistik.
+
+
+## Tahap 7.3 Safe Sync
+Versi ini menambahkan snapshot otomatis, blokir overwrite state kosong/pengurangan massal, pemulihan snapshot khusus admin, dan perbaikan pemuatan state setelah login.

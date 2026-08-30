@@ -33,13 +33,32 @@ function requireRole(...roles) {
   };
 }
 
+async function createStateSnapshot(client, state, version, reason, userId) {
+  await client.query(`INSERT INTO app_state_snapshots (state, source_version, reason, user_id) VALUES ($1::jsonb,$2,$3,$4)`, [JSON.stringify(state||{}), Number(version||0), String(reason||'STATE_SAVE'), userId||null]);
+}
+
+function collectionSize(state, key) { return Array.isArray(state?.[key]) ? state[key].length : 0; }
+function significantStateDrop(dbState, incoming) {
+  const keys=['products','categories','inventory','inventoryMovements','sellerBookings','workReports','payoutRequests','scannedResi','salesClosings','damagedGoods','returnedGoods'];
+  const drops=[];
+  for (const key of keys) {
+    const before=collectionSize(dbState,key), after=collectionSize(incoming,key);
+    if (before >= 3 && after === 0) drops.push(key);
+    else if (before >= 10 && after < Math.floor(before*0.5)) drops.push(key);
+  }
+  return drops;
+}
+
 async function mutateState(mutator) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const r = await client.query('SELECT state, version FROM app_state WHERE id=1 FOR UPDATE');
     const state = r.rows[0]?.state || {};
+    const previousState = JSON.parse(JSON.stringify(state));
+    const previousVersion = Number(r.rows[0]?.version||0);
     const result = await mutator(state, client);
+    await createStateSnapshot(client, previousState, previousVersion, 'MUTATION', null);
     const saved = await client.query('UPDATE app_state SET state=$1::jsonb, version=version+1, updated_at=NOW() WHERE id=1 RETURNING version', [JSON.stringify(state)]);
     await client.query('COMMIT');
     return { result, version:Number(saved.rows[0].version) };
@@ -560,14 +579,21 @@ app.post('/api/state', auth, async (req,res)=>{
 
     const incoming = req.body || {};
 
-    // Proteksi data kosong: Cegah peranti menimpa database dengan state kosong jika DB sudah memiliki produk/kategori
-    const dbHasData = (Array.isArray(dbState.products) && dbState.products.length > 0) || (Array.isArray(dbState.categories) && dbState.categories.length > 0);
-    const incomingIsEmpty = (!Array.isArray(incoming.products) || incoming.products.length === 0) && (!Array.isArray(incoming.categories) || incoming.categories.length === 0);
-    if (dbHasData && incomingIsEmpty) {
+    // Safe Sync: tolak overwrite kosong atau pengurangan massal yang mencurigakan.
+    const keys=['products','categories','inventory','inventoryMovements','sellerBookings','workReports','payoutRequests','scannedResi','salesClosings','damagedGoods','returnedGoods'];
+    const dbHasData = keys.some(k=>collectionSize(dbState,k)>0);
+    const incomingHasData = keys.some(k=>collectionSize(incoming,k)>0);
+    if (dbHasData && !incomingHasData) {
       await client.query('ROLLBACK');
-      return res.status(400).json({success:false, message:'Penimpaan ditolak karena data pengganti tidak lengkap atau kosong.', version});
+      return res.status(400).json({success:false,message:'Penyimpanan diblokir: perangkat mencoba mengganti data server dengan state kosong.',version});
+    }
+    const dropped = significantStateDrop(dbState, incoming);
+    if (dropped.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({success:false,message:`Penyimpanan diblokir karena terdeteksi pengurangan data besar pada: ${dropped.join(', ')}. Data terbaru perlu dimuat ulang terlebih dahulu.`,version,collections:dropped});
     }
 
+    await createStateSnapshot(client, dbState, version, 'STATE_SAVE', req.user?.id||null);
     await syncUsers(client, incoming.users || []);
     const {users, ...state} = incoming;
     const saved=await client.query('UPDATE app_state SET state=$1::jsonb, version=version+1, updated_at=NOW() WHERE id=1 RETURNING version',[JSON.stringify(state)]);
@@ -581,6 +607,17 @@ app.post('/api/state', auth, async (req,res)=>{
   finally{client.release();}
 });
 
+app.get('/api/state-snapshots', auth, requireRole('admin'), async (req,res)=>{
+  try { const r=await pool.query('SELECT id, source_version, reason, user_id, created_at FROM app_state_snapshots ORDER BY id DESC LIMIT 30'); res.json({success:true,data:r.rows}); }
+  catch(e){res.status(500).json({success:false,message:'Gagal memuat riwayat snapshot.'});}
+});
+app.post('/api/state-snapshots/:id/restore', auth, requireRole('admin'), async (req,res)=>{
+  const client=await pool.connect();
+  try { await client.query('BEGIN'); const cur=await client.query('SELECT state,version FROM app_state WHERE id=1 FOR UPDATE'); const snap=await client.query('SELECT state FROM app_state_snapshots WHERE id=$1',[req.params.id]); if(!snap.rowCount) throw Object.assign(new Error('Snapshot tidak ditemukan.'),{status:404}); await createStateSnapshot(client,cur.rows[0]?.state||{},Number(cur.rows[0]?.version||0),'BEFORE_RESTORE',req.user?.id||null); const saved=await client.query('UPDATE app_state SET state=$1::jsonb,version=version+1,updated_at=NOW() WHERE id=1 RETURNING version',[JSON.stringify(snap.rows[0].state)]); await client.query('COMMIT'); res.json({success:true,message:'Snapshot berhasil dipulihkan.',version:Number(saved.rows[0].version)}); }
+  catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.status||500).json({success:false,message:e.message||'Gagal memulihkan snapshot.'});}
+  finally{client.release();}
+});
+
 app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Endpoint API tidak ditemukan.'}));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
@@ -588,6 +625,7 @@ async function bootstrap(){
   await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
   try { await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;`); } catch(e){}
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state (id integer PRIMARY KEY CHECK(id=1), state jsonb NOT NULL DEFAULT '{}'::jsonb, version bigint NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now());`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_state_snapshots (id bigserial PRIMARY KEY, state jsonb NOT NULL, source_version bigint NOT NULL, reason text NOT NULL, user_id text NULL, created_at timestamptz NOT NULL DEFAULT now());`);
   const exists=await pool.query('SELECT 1 FROM app_state WHERE id=1');
   if(!exists.rowCount){
     const seed=JSON.parse(fs.readFileSync(path.join(__dirname,'database','seed.json'),'utf8'));
