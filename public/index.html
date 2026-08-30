@@ -14,22 +14,22 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
-<body class="dark-theme">
+<body class="light-theme">
 
     <!-- ==========================================================================
-         1. HALAMAN LOGIN & DAFTAR AKUN DEMO
+         1. HALAMAN LOGIN & REGISTRASI
          ========================================================================== -->
     <div id="login-screen" class="login-screen">
-        <div class="login-wrapper">
+        <div class="login-wrapper login-wrapper-simple">
             <!-- Banner Sisi Kiri -->
             <div class="login-banner">
                 <div class="brand-large">
-                    <div class="brand-large-icon">
+                    <div class="brand-large-icon" id="login-company-icon">
                         <i class="fa-solid fa-boxes-stacked"></i>
                     </div>
                     <div class="brand-large-text">
-                        <h1>GUDANG<span>BAT</span></h1>
-                        <p>SISTEM MANAJEMEN GUDANG MULTI-USER</p>
+                        <h1 id="login-app-name">GUDANG<span>BAT</span></h1>
+                        <p id="login-warehouse-name">SISTEM MANAJEMEN GUDANG MULTI-USER</p>
                     </div>
                 </div>
 
@@ -59,11 +59,24 @@
                 </div>
             </div>
 
-            <!-- Form Login Sisi Kanan -->
+            <!-- Form Login / Registrasi Sisi Kanan -->
             <div class="login-content">
-                <div class="login-header">
-                    <h2>Selamat Datang</h2>
-                    <p>Silakan masuk ke akun GUDANG BAT Anda untuk melanjutkan</p>
+                <!-- Custom Company Logo Display -->
+                <div class="company-logo-header" id="company-logo-preview-box">
+                    <img id="login-company-logo-img" src="" alt="Logo Perusahaan" class="company-logo-img hidden">
+                    <div id="login-company-icon" class="login-company-fallback"><i class="fa-solid fa-boxes-stacked"></i></div>
+                    <h1 id="login-simple-app-name">GUDANG BAT</h1>
+                    <p id="login-simple-subtitle">Masuk ke sistem manajemen gudang</p>
+                </div>
+
+                <!-- Auth Navigation Tabs -->
+                <div class="auth-tabs">
+                    <button type="button" class="auth-tab-btn active" id="tab-btn-login" onclick="switchAuthTab('login')">
+                        <i class="fa-solid fa-right-to-bracket"></i> Masuk
+                    </button>
+                    <button type="button" class="auth-tab-btn" id="tab-btn-register" onclick="switchAuthTab('register')">
+                        <i class="fa-solid fa-user-plus"></i> Daftar Akun Baru
+                    </button>
                 </div>
 
                 <div id="login-alert" class="alert alert-danger hidden">
@@ -71,7 +84,13 @@
                     <span id="login-alert-text">Username atau password salah.</span>
                 </div>
 
-                <form id="form-login">
+                <div id="register-success-alert" class="alert alert-success hidden">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span id="register-success-text">Registrasi berhasil! Menunggu persetujuan Admin.</span>
+                </div>
+
+                <!-- FORM LOGIN -->
+                <form id="form-login" class="auth-form">
                     <div class="form-group">
                         <label class="form-label" for="login-username">Username atau Email</label>
                         <div class="input-icon-wrapper">
@@ -94,7 +113,6 @@
                             <input type="checkbox" id="remember-me">
                             <span>Ingat Saya</span>
                         </label>
-                        <a href="#" id="link-forgot-password" style="font-weight: 600;">Lupa Password?</a>
                     </div>
 
                     <button type="submit" class="btn-login" id="btn-login-submit">
@@ -102,61 +120,79 @@
                     </button>
                 </form>
 
-                <!-- DAFTAR AKUN DEMO SIAP UJI -->
-                <div class="demo-accounts-box">
-                    <div class="demo-title">
-                        <i class="fa-solid fa-users-gear"></i> Daftar Akun Akses Cepat (Uji Coba)
-                    </div>
-                    <div class="demo-cards-list">
-                        <!-- Akun Admin -->
-                        <div class="demo-account-card">
-                            <div class="demo-account-info">
-                                <div class="demo-role-icon role-admin">
-                                    <i class="fa-solid fa-user-shield"></i>
-                                </div>
-                                <div class="demo-account-text">
-                                    <strong>Admin Utama (Full Access)</strong>
-                                    <small>user: <code>admin</code> | pass: <code>admin123</code></small>
-                                </div>
-                            </div>
-                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('admin', 'admin123')">
-                                Gunakan Akun
-                            </button>
-                        </div>
-
-                        <!-- Akun Gudang -->
-                        <div class="demo-account-card">
-                            <div class="demo-account-info">
-                                <div class="demo-role-icon role-gudang">
-                                    <i class="fa-solid fa-dolly"></i>
-                                </div>
-                                <div class="demo-account-text">
-                                    <strong>Pekerja Gudang</strong>
-                                    <small>user: <code>gudang</code> | pass: <code>gudang123</code></small>
-                                </div>
-                            </div>
-                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('gudang', 'gudang123')">
-                                Gunakan Akun
-                            </button>
-                        </div>
-
-                        <!-- Akun Seller -->
-                        <div class="demo-account-card">
-                            <div class="demo-account-info">
-                                <div class="demo-role-icon role-seller">
-                                    <i class="fa-solid fa-store"></i>
-                                </div>
-                                <div class="demo-account-text">
-                                    <strong>Seller / Penjual</strong>
-                                    <small>user: <code>seller</code> | pass: <code>seller123</code></small>
-                                </div>
-                            </div>
-                            <button type="button" class="btn-quick-login" onclick="fillQuickLogin('seller', 'seller123')">
-                                Gunakan Akun
-                            </button>
+                <!-- FORM REGISTRASI PENGGUNA BARU -->
+                <form id="form-register" class="auth-form hidden">
+                    <div class="form-group">
+                        <label class="form-label" for="reg-username">Username Baru</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-at left-icon"></i>
+                            <input type="text" id="reg-username" class="form-control" placeholder="Contoh: seller_budi / rudi_gudang" required>
                         </div>
                     </div>
-                </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-fullname">Nama Lengkap</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-id-card left-icon"></i>
+                            <input type="text" id="reg-fullname" class="form-control" placeholder="Masukkan nama lengkap Anda" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-email">Alamat Email (Opsional)</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-envelope left-icon"></i>
+                            <input type="email" id="reg-email" class="form-control" placeholder="nama@email.com">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-phone">No. WhatsApp / Telepon</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-phone left-icon"></i>
+                            <input type="tel" id="reg-phone" class="form-control" placeholder="Contoh: 08123456789">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-role-requested">Pengajuan Peran / Posisi</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-briefcase left-icon"></i>
+                            <select id="reg-role-requested" class="form-control" required>
+                                <option value="seller">Seller / Penjual</option>
+                                <option value="gudang">Pekerja Gudang (Worker)</option>
+                                <option value="admin">Permohonan Akun Admin</option>
+                            </select>
+                        </div>
+                        <small class="text-muted" style="font-size: 11px; margin-top: 4px; display: block;">Peran definitif dan hak akses akan ditentukan oleh Admin Pusat setelah peninjauan.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-password">Password</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-lock left-icon"></i>
+                            <input type="password" id="reg-password" class="form-control" placeholder="Minimal 6 karakter" required minlength="6">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-note">Catatan untuk Admin (Opsional)</label>
+                        <textarea id="reg-note" class="form-control" rows="2" placeholder="Contoh: Saya mengajukan akun untuk operasional gudang."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg-password-confirm">Konfirmasi Password</label>
+                        <div class="input-icon-wrapper">
+                            <i class="fa-solid fa-lock left-icon"></i>
+                            <input type="password" id="reg-password-confirm" class="form-control" placeholder="Ketik ulang password" required minlength="6">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-login btn-success" id="btn-register-submit">
+                        <i class="fa-solid fa-paper-plane"></i> Kirim Pendaftaran
+                    </button>
+                </form>
+
             </div>
         </div>
     </div>
@@ -244,6 +280,15 @@
                 <button class="nav-link" data-view="admin-reports">
                     <i class="fa-solid fa-file-invoice"></i>
                     <span>Laporan & Statistik</span>
+                </button>
+                <button class="nav-link" data-view="admin-pending-users">
+                    <i class="fa-solid fa-user-clock"></i>
+                    <span>Persetujuan Akun</span>
+                    <span class="nav-badge badge-warning hidden" id="badge-admin-pending">0</span>
+                </button>
+                <button class="nav-link" data-view="admin-roles">
+                    <i class="fa-solid fa-user-lock"></i>
+                    <span>Hak Akses & Peran (RBAC)</span>
                 </button>
                 <button class="nav-link" data-view="admin-users">
                     <i class="fa-solid fa-users"></i>
@@ -891,18 +936,98 @@
                     </div>
                 </section>
 
+                <!-- VIEW ADMIN PERSETUJUAN AKUN PENDING -->
+                <section id="view-admin-pending-users" class="app-view hidden">
+                    <div class="card-table-wrapper">
+                        <div class="table-toolbar">
+                            <h3 style="font-size: 15px; font-weight: 700;">
+                                <i class="fa-solid fa-user-clock text-warning"></i> Persetujuan Akun Pendaftaran Baru
+                            </h3>
+                            <button class="btn btn-secondary btn-sm" id="btn-refresh-pending-users">
+                                <i class="fa-solid fa-arrows-rotate"></i> Muat Ulang
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Waktu Daftar</th>
+                                        <th>Nama Lengkap</th>
+                                        <th>Username</th>
+                                        <th>Kontak (Email/HP)</th>
+                                        <th>Pengajuan Peran</th>
+                                        <th>Tentukan Peran Akses</th>
+                                        <th class="text-right">Aksi Persetujuan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-pending-users-list">
+                                    <!-- Dynamic Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN HAK AKSES & PERAN (RBAC) -->
+                <section id="view-admin-roles" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding: 24px;">
+                        <div class="table-toolbar" style="margin-bottom: 20px;">
+                            <div>
+                                <h3 style="font-size: 17px; font-weight: 700;">Manajemen Hak Akses & Peran (RBAC)</h3>
+                                <p class="text-muted" style="font-size: 13px;">Atur izin modul dan fitur aplikasi untuk masing-masing peran (Admin, Gudang, Seller, dan Peran Kustom).</p>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-secondary btn-sm" id="btn-add-custom-role">
+                                    <i class="fa-solid fa-plus"></i> Tambah Peran Baru
+                                </button>
+                                <button class="btn btn-primary btn-sm" id="btn-save-rbac-matrix">
+                                    <i class="fa-solid fa-floppy-disk"></i> Simpan Matriks Hak Akses
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="data-table rbac-table" id="table-rbac-matrix">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 250px;">Modul / Fitur Sistem</th>
+                                        <th class="text-center">Admin</th>
+                                        <th class="text-center">Pekerja Gudang</th>
+                                        <th class="text-center">Seller / Penjual</th>
+                                        <!-- Dynamic Custom Roles Header -->
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-rbac-matrix">
+                                    <!-- Dynamic Permission Matrix Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- VIEW ADMIN PENGATURAN -->
                 <section id="view-admin-settings" class="app-view hidden">
-                    <div class="card-table-wrapper" style="padding: 24px; max-width: 700px;">
-                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Pengaturan Aplikasi GUDANG BAT</h3>
+                    <div class="card-table-wrapper" style="padding: 24px; max-width: 750px;">
+                        <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 20px;">Pengaturan Aplikasi & Identitas Perusahaan</h3>
                         <form id="form-settings">
                             <div class="form-group">
                                 <label class="form-label">Nama Aplikasi Web</label>
                                 <input type="text" id="setting-app-name" class="form-control" value="GUDANG BAT">
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Nama Gudang / Lokasi Cabang</label>
+                                <label class="form-label">Nama Gudang / Lokasi Cabang Utama</label>
                                 <input type="text" id="setting-warehouse-name" class="form-control" value="Gudang Utama BAT Logistics - Jakarta">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">URL Logo Perusahaan (Tampil di Login & Sidebar)</label>
+                                <input type="url" id="setting-company-logo" class="form-control" placeholder="https://domain.com/logo.png atau data:image/png;base64,...">
+                                <input type="file" id="setting-company-logo-file" class="form-control" accept="image/*" style="margin-top:8px;">
+                                <small class="text-muted">Kosongkan jika ingin menggunakan ikon bawaan sistem GUDANG BAT.</small>
+                            </div>
+                            <div class="logo-preview-setting-box" style="margin-bottom: 16px; padding: 12px; border: 1px dashed var(--border-color); border-radius: 8px; text-align: center;">
+                                <small style="display: block; margin-bottom: 8px; font-weight: 600;">Pratinjau Logo Perusahaan Saat Ini:</small>
+                                <img id="setting-logo-preview" src="" alt="Pratinjau Logo" style="max-height: 70px; max-width: 220px; object-fit: contain;" class="hidden">
+                                <div id="setting-logo-placeholder" class="text-muted"><i class="fa-solid fa-boxes-stacked" style="font-size: 32px; color: var(--primary);"></i><br><small>Logo Bawaan Sistem</small></div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Masa Berlaku Booking Seller (Hari)</label>
@@ -1733,6 +1858,8 @@
                         <label class="form-label">No Telepon / WhatsApp</label>
                         <input type="text" id="usr-phone" class="form-control" placeholder="0812...">
                     </div>
+                    <div class="form-group"><label class="form-label">Status Akun</label><select id="usr-status" class="form-control"><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></div>
+                    <div class="form-group"><label class="form-label">Hak Akses Individu</label><small class="text-muted" style="display:block;margin-bottom:8px;">Centang akses khusus untuk akun ini. Hak akses ini dapat berbeda dari role.</small><div id="usr-permissions" class="permissions-grid"></div></div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -1765,6 +1892,37 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-close">Batal</button>
                 <button class="btn btn-primary" id="btn-submit-scanned-barcode">Gunakan Resi Ini</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TAMBAH PERAN KUSTOM (RBAC) -->
+    <div class="modal-backdrop" id="modal-custom-role">
+        <div class="modal-card" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Tambah Peran Akses Baru (Custom Role)</h3>
+                <button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-custom-role">
+                    <div class="form-group">
+                        <label class="form-label">Nama Peran / Posisi Akses</label>
+                        <input type="text" id="role-name-input" class="form-control" placeholder="Contoh: Manager Gudang, Operator QC, Kasir" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Kode Peran (ID)</label>
+                        <input type="text" id="role-id-input" class="form-control" placeholder="Contoh: manager_gudang, operator_qc" required>
+                        <small class="text-muted">Gunakan huruf kecil tanpa spasi.</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Deskripsi Peran</label>
+                        <textarea id="role-desc-input" class="form-control" rows="2" placeholder="Detail wewenang peran ini..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Batal</button>
+                <button class="btn btn-primary" id="btn-save-custom-role">Simpan Peran Baru</button>
             </div>
         </div>
     </div>
