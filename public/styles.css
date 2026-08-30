@@ -1159,12 +1159,16 @@ input, select, textarea {
   margin-bottom: 20px;
 }
 .company-logo-img {
-  max-height: 80px;
-  max-width: 240px;
+  /* Menempati posisi yang sama dengan ikon 3 kotak bawaan */
+  width: 82px;
+  height: 82px;
+  max-width: 82px;
+  max-height: 82px;
   object-fit: contain;
-  margin: 0 auto;
+  margin: 0 auto 12px;
   display: block;
 }
+.company-logo-img.hidden{display:none!important;}
 .auth-tabs {
   display: flex;
   background: var(--bg-tertiary);
