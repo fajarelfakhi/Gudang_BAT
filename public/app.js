@@ -73,6 +73,22 @@ const ALL_PERMISSIONS = [
   { id: 'rbac.manage', label: 'Manajemen Hak Akses & Matriks Peran (RBAC)' }
 ];
 
+const VIEW_PERMISSIONS = {
+  'admin-dashboard':'dashboard.view','gudang-dashboard':'dashboard.view','seller-dashboard':'dashboard.view',
+  'admin-products':'products.manage','admin-stocks':'stocks.view','admin-stock-ins':'inventory.in_out','admin-stock-outs':'inventory.in_out',
+  'admin-work-management':'wages.manage','admin-seller-bookings':'seller.booking','admin-sales-closing':'sales.closing','admin-damaged-goods':'inventory.qc','admin-returned-goods':'inventory.qc',
+  'admin-wages':'wages.manage','admin-payouts':'wages.manage','admin-reports':'dashboard.view','admin-pending-users':'system.settings','admin-roles':'rbac.manage','admin-users':'system.settings','admin-activity-logs':'system.settings','admin-settings':'system.settings','admin-profile':'dashboard.view',
+  'gudang-targets':'dashboard.view','gudang-work-report':'work.reports','gudang-work-history':'work.reports','gudang-earnings':'wages.manage','gudang-payout-request':'wages.manage','gudang-profile':'dashboard.view',
+  'seller-stock-view':'stocks.view','seller-booking-form':'seller.booking','seller-booking-history':'seller.booking','seller-sales-status':'sales.closing','seller-profile':'dashboard.view'
+};
+function getCurrentPermissions(){ return currentUser?.permissions || appState.rbac?.rolePermissions?.[currentUser?.role] || []; }
+function hasPermission(permission){ const p=getCurrentPermissions(); return currentUser?.role==='admin' || p.includes('*') || p.includes(permission); }
+function applyRolePermissionsToUI(){
+  document.querySelectorAll('.nav-link[data-view]').forEach(btn=>{ const perm=VIEW_PERMISSIONS[btn.dataset.view]; btn.classList.toggle('hidden-by-permission', !!perm && !hasPermission(perm)); });
+  const first=[...document.querySelectorAll('.sidebar-nav:not(.hidden) .nav-link:not(.hidden-by-permission)')][0];
+  if(first && !document.querySelector('.sidebar-nav:not(.hidden) .nav-link.active:not(.hidden-by-permission)')) first.classList.add('active');
+}
+
 function ensureStateShape() {
   const defaults = {
     settings: {
@@ -160,6 +176,19 @@ function initThemeMode() {
   if (themeIcon) themeIcon.className = savedTheme === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
 }
 
+async function loadPublicBranding() {
+  try {
+    const res=await fetch(`${API_BASE}/public/settings`,{cache:'no-store'});
+    const json=await res.json();
+    if(json?.success && json.data){
+      appState.settings={...appState.settings,...json.data};
+      const appName=document.getElementById('login-simple-app-name'); if(appName) appName.textContent=json.data.appName||'GUDANG BAT';
+      const sub=document.getElementById('login-simple-subtitle'); if(sub) sub.textContent=json.data.warehouseName||'Masuk ke sistem manajemen gudang';
+      renderCompanyLogo();
+    }
+  } catch { renderCompanyLogo(); }
+}
+
 function renderCompanyLogo() {
   const logoUrl = appState.settings?.companyLogo || '';
   const appName = appState.settings?.appName || 'GUDANG BAT';
@@ -211,6 +240,7 @@ function renderCompanyLogo() {
 document.addEventListener('DOMContentLoaded', () => {
   initThemeMode();
   initEventListeners();
+  loadPublicBranding();
   // Jangan memuat atau menyimpan state sebelum sesi pengguna tervalidasi.
   // Ini mencegah perangkat baru dengan state lokal kosong menimpa data server.
   checkSavedSession();
@@ -428,6 +458,7 @@ async function performRegistrationProcess() {
   const requestedRole = document.getElementById('reg-role-requested')?.value;
   const password = document.getElementById('reg-password')?.value;
   const passwordConfirm = document.getElementById('reg-password-confirm')?.value;
+  const note = document.getElementById('reg-note')?.value.trim();
   const btnSubmit = document.getElementById('btn-register-submit');
   const alertSuccess = document.getElementById('register-success-alert');
   const alertSuccessText = document.getElementById('register-success-text');
@@ -443,7 +474,7 @@ async function performRegistrationProcess() {
     const res = await apiRequest(`${API_BASE}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, name, email, phone, requestedRole })
+      body: JSON.stringify({ username, password, name, email, phone, requestedRole, note })
     });
 
     if (alertSuccess && alertSuccessText) {
@@ -474,6 +505,7 @@ function resetLoginBtn(submitBtn, originalHtml) {
 async function loginSuccess(user, token = null) {
   currentUser = user;
   if (token) localStorage.setItem('gudangbat_token', token);
+  try { const me=await apiRequest(`${API_BASE}/me`); if(me?.user) user={...user,...me.user}; } catch {}
   localStorage.setItem('gudangbat_user', JSON.stringify(user));
   
   // Wajib muat state dari server terlebih dahulu sebelum menampilkan UI!
@@ -514,11 +546,12 @@ async function loginSuccess(user, token = null) {
     if (navSeller) navSeller.classList.remove('hidden');
     switchView('seller-dashboard');
   } else {
-    // Custom Role
-    if (navGudang) navGudang.classList.remove('hidden');
-    switchView('gudang-dashboard');
+    // Custom Role: gunakan shell menu yang difilter oleh matriks hak akses
+    if (navAdmin) navAdmin.classList.remove('hidden');
+    switchView('admin-dashboard');
   }
 
+  applyRolePermissionsToUI();
   setProfilePhotoUI((appState.userProfiles && appState.userProfiles[user.id] && appState.userProfiles[user.id].avatarData) || '');
   renderCompanyLogo();
   updateNotificationBadges();
@@ -603,7 +636,7 @@ function updateWorkVariantOptions() {
 
 async function submitGudangWorkReport(event) {
   event.preventDefault();
-  if (!currentUser || currentUser.role !== 'gudang') return showToast('Hanya akun Gudang yang dapat mengirim laporan pekerjaan.', 'danger');
+  if (!currentUser || !hasPermission('work.reports')) return showToast('Anda tidak memiliki hak akses untuk mengirim laporan pekerjaan.', 'danger');
   const workTypeId=document.getElementById('wrk-work-type-id')?.value, productId=document.getElementById('wrk-product-id')?.value, variantId=document.getElementById('wrk-variant-id')?.value;
   const qty=Number(document.getElementById('wrk-qty')?.value||0), condition=document.getElementById('wrk-condition')?.value||'Lolos', note=document.getElementById('wrk-note')?.value.trim()||'';
   if(!workTypeId||!productId||!variantId||qty<=0) return showToast('Lengkapi jenis pekerjaan, produk, varian, dan jumlah pekerjaan.','warning');
@@ -656,7 +689,7 @@ function updateBookingAvailability() {
 
 async function submitSellerBooking(event) {
   event.preventDefault();
-  if (!currentUser || currentUser.role !== 'seller') return showToast('Hanya akun Seller yang dapat membuat booking.', 'danger');
+  if (!currentUser || !hasPermission('seller.booking')) return showToast('Anda tidak memiliki hak akses untuk membuat booking.', 'danger');
   const pId = document.getElementById('bkg-product-id')?.value;
   const vId = document.getElementById('bkg-variant-id')?.value;
   const qty = Number(document.getElementById('bkg-qty')?.value || 0);
@@ -674,7 +707,7 @@ async function submitSellerBooking(event) {
 
 async function submitPayoutRequest(event) {
   event.preventDefault();
-  if (!currentUser || currentUser.role !== 'gudang') return showToast('Hanya akun Gudang yang dapat mengajukan pencairan.', 'danger');
+  if (!currentUser || !(hasPermission('work.reports') || hasPermission('wages.manage'))) return showToast('Anda tidak memiliki hak akses untuk mengajukan pencairan.', 'danger');
   const amount=Number(document.getElementById('payout-amount')?.value||0), paymentMethod=document.getElementById('payout-method')?.value||'', accountNo=document.getElementById('payout-account')?.value.trim()||'', note=document.getElementById('payout-note')?.value.trim()||'';
   try {const res=await apiRequest('/api/wage-withdrawals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,paymentMethod,accountNo,note,workerName:currentUser.name})});await syncFetchState(true);document.getElementById('form-payout-request')?.reset();renderGudangPayoutRequest();showToast(res.message||'Pengajuan pencairan berhasil dikirim.','success');}
   catch(err){showToast(err.message||'Pengajuan pencairan gagal disimpan.','danger');}
@@ -870,6 +903,8 @@ function initEventListeners() {
 }
 
 function switchView(viewId) {
+  const requiredPermission = VIEW_PERMISSIONS[viewId];
+  if (requiredPermission && !hasPermission(requiredPermission)) { showToast('Anda tidak memiliki hak akses ke menu ini.', 'danger'); return; }
   document.querySelectorAll('.app-view').forEach(view => view.classList.add('hidden'));
   const targetView = document.getElementById(`view-${viewId}`);
   if (targetView) {
@@ -1706,7 +1741,7 @@ function renderAdminSalesClosing() {
 }
 
 async function executeClosingProcess(resiNo) {
-  if (!currentUser || currentUser.role !== 'admin') { showToast('Hanya Admin yang dapat melakukan closing penjualan.', 'danger'); return; }
+  if (!currentUser || !hasPermission('sales.closing')) { showToast('Anda tidak memiliki hak akses untuk melakukan closing penjualan.', 'danger'); return; }
   const selectedBookingId = document.getElementById('closing-booking-id')?.value;
   const activeBooking = (appState.sellerBookings || []).find(b => b.id === selectedBookingId && b.status === 'Aktif');
   if (!activeBooking) { showToast(`Pilih booking aktif yang sesuai sebelum melakukan closing resi ${resiNo}.`, 'danger'); return; }
@@ -1897,27 +1932,30 @@ function initReportListeners() {
 // ==========================================================================
 // 10. MANAJEMEN PENGGUNA & LOG AKTIVITAS (ADMIN)
 // ==========================================================================
-function renderAdminUsers() {
+async function renderAdminUsers() {
   const tbody = document.getElementById('tbody-users-list');
   if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const users = appState.users || [];
-  users.forEach(u => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><strong>${u.name}</strong></td>
-      <td><code>${u.username}</code></td>
-      <td><span class="badge badge-role-${u.role}">${u.role.toUpperCase()}</span></td>
-      <td>${u.email || '-'} / ${u.phone || '-'}</td>
-      <td><span class="badge ${u.status === 'active' ? 'badge-success' : 'badge-danger'}">${u.status === 'active' ? 'Aktif' : 'Nonaktif'}</span></td>
-      <td class="text-right">
-        <button class="btn btn-secondary btn-sm" onclick="editUser('${u.id}')"><i class="fa-solid fa-pen"></i></button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
+  tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Memuat pengguna...</td></tr>`;
+  try {
+    const res=await apiRequest(`${API_BASE}/users`); const users=res.data||[]; appState.users=users;
+    if(!users.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center text-muted" style="padding:24px;">Belum ada akun pengguna.</td></tr>`;return;}
+    tbody.innerHTML=users.map(u=>`<tr>
+      <td><strong>${escapeHtml(u.name||'-')}</strong></td><td><code>${escapeHtml(u.username||'-')}</code></td>
+      <td><span class="badge badge-role-${escapeHtml(u.role||'seller')}">${escapeHtml(String(u.role||'seller').toUpperCase())}</span></td>
+      <td>${escapeHtml(u.email||'-')} / ${escapeHtml(u.phone||'-')}</td>
+      <td><span class="badge ${u.status==='active'?'badge-success':'badge-warning'}">${escapeHtml(u.status||'-')}</span></td>
+      <td class="text-right"><button class="btn btn-secondary btn-sm" onclick="editUser('${u.id}')"><i class="fa-solid fa-pen"></i></button> <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')"><i class="fa-solid fa-trash"></i></button></td>
+    </tr>`).join('');
+  } catch(e){ tbody.innerHTML=`<tr><td colspan="6" class="text-center text-danger">Gagal memuat pengguna: ${escapeHtml(e.message||'')}</td></tr>`; }
 }
+function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+async function editUser(id){
+  try{const res=await apiRequest(`${API_BASE}/users`); const u=(res.data||[]).find(x=>x.id===id); if(!u)return showToast('Pengguna tidak ditemukan.','danger');
+    document.getElementById('usr-id').value=u.id; document.getElementById('usr-name').value=u.name||''; document.getElementById('usr-username').value=u.username||''; document.getElementById('usr-password').value=''; document.getElementById('usr-role').value=u.role||'seller'; document.getElementById('usr-email').value=u.email||''; document.getElementById('usr-phone').value=u.phone||''; document.getElementById('modal-user-title').textContent='Edit Akun & Hak Akses'; document.getElementById('usr-status').value=u.status||'active'; renderUserPermissionChecks(u.permissions||[]); document.getElementById('modal-user').classList.add('active');
+  }catch(e){showToast(e.message||'Gagal membuka pengguna.','danger');}
+}
+async function deleteUser(id){ showConfirmDialog('Hapus Akun','Hapus akun ini secara permanen?',async()=>{try{const r=await apiRequest(`${API_BASE}/users/${id}`,{method:'DELETE'});showToast(r.message||'Akun dihapus.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menghapus akun.','danger');}}); }
+function renderUserPermissionChecks(selected=[]){ const box=document.getElementById('usr-permissions'); if(!box)return; box.innerHTML=ALL_PERMISSIONS.map(p=>`<label class="permission-chip"><input type="checkbox" value="${p.id}" ${selected.includes(p.id)?'checked':''}> ${p.label}</label>`).join(''); }
 
 function renderAdminActivityLogs() {
   const tbody = document.getElementById('tbody-activity-logs-list');
@@ -2698,19 +2736,18 @@ function initModalActions() {
     btnOpenUser.addEventListener('click', () => {
       const form = document.getElementById('form-user');
       if (form) form.reset();
+      document.getElementById('usr-id').value=''; document.getElementById('modal-user-title').textContent='Tambah Akun Pengguna System'; document.getElementById('usr-status').value='active'; renderUserPermissionChecks([]);
       const modal = document.getElementById('modal-user');
       if (modal) modal.classList.add('active');
     });
   }
 
   const btnSaveUser = document.getElementById('btn-save-user');
-  if (btnSaveUser) btnSaveUser.addEventListener('click', () => {
-    const id=document.getElementById('usr-id').value.trim(); const name=document.getElementById('usr-name').value.trim(); const username=document.getElementById('usr-username').value.trim(); const pass=document.getElementById('usr-password').value.trim(); const role=document.getElementById('usr-role').value; const email=document.getElementById('usr-email').value.trim(); const phone=document.getElementById('usr-phone').value.trim();
-    if(!name||!username||(!id&&!pass)) return showToast('Nama, username, dan password wajib diisi untuk akun baru.','warning');
-    if((appState.users||[]).some(u=>u.id!==id && String(u.username).toLowerCase()===username.toLowerCase())) return showToast('Username sudah digunakan.','warning');
-    const existing=(appState.users||[]).find(u=>u.id===id); const obj={...(existing||{}),id:id||'USR-'+Date.now(),username,name,role,email,phone,status:existing?.status||'active',updatedAt:new Date().toISOString()}; if(pass) obj.password=pass;
-    if(existing) Object.assign(existing,obj); else (appState.users||(appState.users=[])).push({...obj,password:pass,createdAt:new Date().toISOString()});
-    document.getElementById('modal-user')?.classList.remove('active'); persistAppState(existing?'EDIT_PENGGUNA':'TAMBAH_PENGGUNA', `${existing?'Memperbarui':'Menambahkan'} akun ${name}`); showToast('Akun pengguna berhasil disimpan!','success');
+  if (btnSaveUser) btnSaveUser.addEventListener('click', async () => {
+    const id=document.getElementById('usr-id').value.trim(), name=document.getElementById('usr-name').value.trim(), username=document.getElementById('usr-username').value.trim(), password=document.getElementById('usr-password').value, role=document.getElementById('usr-role').value, email=document.getElementById('usr-email').value.trim(), phone=document.getElementById('usr-phone').value.trim(), status=document.getElementById('usr-status').value;
+    const permissions=[...document.querySelectorAll('#usr-permissions input:checked')].map(x=>x.value);
+    if(!name||!username||(!id&&!password)) return showToast('Nama, username, dan password wajib diisi untuk akun baru.','warning');
+    try{const payload={name,username,role,email,phone,status,permissions};if(password)payload.password=password; const res=await apiRequest(`${API_BASE}/users${id?'/'+id:''}`,{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); document.getElementById('modal-user')?.classList.remove('active');showToast(res.message||'Akun berhasil disimpan.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menyimpan akun.','danger');}
   });
 
   // App Settings Form Submit
@@ -2958,3 +2995,14 @@ async function startCameraScanner(){
 function stopCameraScanner(){if(barcodeTimer){clearInterval(barcodeTimer);barcodeTimer=null;} if(barcodeStream){barcodeStream.getTracks().forEach(t=>t.stop());barcodeStream=null;} const v=document.getElementById('barcode-camera-video');if(v){v.pause?.();v.srcObject=null;v.style.display='none';} document.getElementById('barcode-camera-icon')?.style.setProperty('display','block');}
 document.addEventListener('click',e=>{if(e.target.closest('#btn-start-camera-scan'))startCameraScanner(); if(e.target.closest('.modal-close')||e.target.closest('#btn-submit-scanned-barcode'))setTimeout(stopCameraScanner,50);});
 document.getElementById('btn-dashboard-refresh')?.addEventListener('click',()=>syncFetchState());
+
+
+// === Upgrade Auth & Identitas Perusahaan ===
+document.addEventListener('change', (e) => {
+  if (e.target?.id === 'setting-company-logo-file') {
+    const file=e.target.files?.[0]; if(!file)return;
+    if(!file.type.startsWith('image/')) return showToast('Pilih file gambar untuk logo perusahaan.','warning');
+    if(file.size>2*1024*1024) return showToast('Ukuran logo maksimal 2 MB.','warning');
+    const r=new FileReader(); r.onload=()=>{ const input=document.getElementById('setting-company-logo'); if(input){input.value=r.result; renderCompanyLogo();} }; r.readAsDataURL(file);
+  }
+});
