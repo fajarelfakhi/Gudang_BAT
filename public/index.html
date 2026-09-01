@@ -1040,6 +1040,33 @@
                             <button type="submit" class="btn btn-primary">
                                 <i class="fa-solid fa-floppy-disk"></i> Simpan Pengaturan
                             </button>
+                            <div class="integrity-audit-panel">
+                                <div><h4><i class="fa-solid fa-shield-halved"></i> Pemeriksaan Integritas Data</h4><p class="text-muted">Periksa apakah stok, booking, resi closing, dan data transaksi memiliki indikasi inkonsistensi. Pemeriksaan ini tidak mengubah data.</p></div>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-integrity-audit"><i class="fa-solid fa-magnifying-glass-chart"></i> Jalankan Audit</button>
+                                <div id="integrity-audit-result" class="integrity-audit-result"></div>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- VIEW ADMIN PROFILE -->
+                <section id="view-admin-profile" class="app-view hidden">
+                    <div class="profile-shell profile-admin-shell">
+                        <div class="profile-cover profile-cover-soft"></div>
+                        <div class="profile-card-main">
+                            <div class="profile-avatar-wrap"><img class="profile-avatar-image" data-profile-image alt="Foto profil admin"><div class="profile-avatar-fallback" data-profile-fallback>A</div><label class="profile-photo-action" title="Ubah foto profil"><i class="fa-solid fa-camera"></i><input type="file" data-profile-upload accept="image/*" hidden></label></div>
+                            <div><span class="eyebrow">ADMIN PUSAT</span><h3 data-profile-name>Nama Admin</h3><p data-profile-role>ADMIN</p></div>
+                        </div>
+                        <div class="profile-summary-strip">
+                            <div><span>Status</span><strong class="text-success">Akun Aktif</strong></div>
+                            <div><span>Hak Akses</span><strong>Akses Penuh</strong></div>
+                            <div><span>Peran</span><strong>Administrator</strong></div>
+                        </div>
+                        <form class="profile-form" data-profile-form>
+                            <div class="profile-section-title"><div><h3>Informasi Profil</h3><p>Perbarui identitas yang digunakan di aplikasi.</p></div></div>
+                            <div class="form-grid-2"><div class="form-group"><label class="form-label">Nama Lengkap</label><input class="form-control" data-profile-field="name" required></div><div class="form-group"><label class="form-label">Username</label><input class="form-control" data-profile-field="username" required></div></div>
+                            <div class="form-grid-2"><div class="form-group"><label class="form-label">Email</label><input type="email" class="form-control" data-profile-field="email"></div><div class="form-group"><label class="form-label">No. Telepon</label><input class="form-control" data-profile-field="phone"></div></div>
+                            <div class="profile-actions"><span class="text-muted"><i class="fa-solid fa-shield-halved"></i> Data profil tersimpan ke akun online.</span><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> Simpan Perubahan</button></div>
                         </form>
                     </div>
                 </section>
@@ -1047,39 +1074,55 @@
                 <!-- VIEW GUDANG WORKER DASHBOARD -->
                 <section id="view-gudang-dashboard" class="app-view hidden">
                     <div class="stats-grid">
-                        <div class="stat-card">
+                        <button type="button" class="stat-card stat-card-button" data-gudang-summary="target">
                             <div class="stat-icon icon-blue"><i class="fa-solid fa-bullseye"></i></div>
                             <div class="stat-details">
                                 <h3 id="gudang-stat-today-target">0 Unit</h3>
                                 <p>Target Hari Ini</p>
-                            </div>
-                        </div>
-                        <div class="stat-card">
+                            </div><i class="stat-card-arrow fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button type="button" class="stat-card stat-card-button" data-gudang-summary="done">
                             <div class="stat-icon icon-green"><i class="fa-solid fa-circle-check"></i></div>
                             <div class="stat-details">
                                 <h3 id="gudang-stat-today-done">0 Unit</h3>
                                 <p>Selesai Hari Ini</p>
-                            </div>
-                        </div>
-                        <div class="stat-card">
+                            </div><i class="stat-card-arrow fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button type="button" class="stat-card stat-card-button" data-gudang-summary="wage">
                             <div class="stat-icon icon-green"><i class="fa-solid fa-wallet"></i></div>
                             <div class="stat-details">
                                 <h3 id="gudang-stat-today-wage">Rp 0</h3>
                                 <p>Pendapatan Hari Ini</p>
-                            </div>
-                        </div>
-                        <div class="stat-card">
+                            </div><i class="stat-card-arrow fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button type="button" class="stat-card stat-card-button" data-gudang-summary="unpaid">
                             <div class="stat-icon icon-amber"><i class="fa-solid fa-clock"></i></div>
                             <div class="stat-details">
                                 <h3 id="gudang-stat-unpaid">Rp 0</h3>
-                                <p>Upah Belum Dicairkan</p>
-                            </div>
+                                <p>Sisa Upah Belum Dicairkan</p>
+                            </div><i class="stat-card-arrow fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+
+                    <div class="period-filter-card">
+                        <div><strong>Periode Dashboard</strong><small>Filter ringkasan pekerjaan dan upah</small></div>
+                        <div class="period-filter-group" id="gudang-period-filter">
+                            <button type="button" class="btn-period-gudang active" data-period="today">Hari Ini</button>
+                            <button type="button" class="btn-period-gudang" data-period="week">Pekan</button>
+                            <button type="button" class="btn-period-gudang" data-period="month">Bulan</button>
+                            <button type="button" class="btn-period-gudang" data-period="custom">Custom</button>
+                        </div>
+                        <div id="gudang-custom-date-range" class="custom-date-range hidden">
+                            <input type="date" id="gudang-filter-start" class="form-control">
+                            <span>s/d</span>
+                            <input type="date" id="gudang-filter-end" class="form-control">
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-gudang-apply-date">Terapkan</button>
                         </div>
                     </div>
 
                     <div class="card-table-wrapper">
                         <div class="table-toolbar">
-                            <h3 style="font-size: 15px; font-weight: 700;">Target Pekerjaan Saya Hari Ini</h3>
+                            <h3 style="font-size: 15px; font-weight: 700;">Target Pekerjaan <span id="gudang-period-label">Hari Ini</span></h3>
                         </div>
                         <div class="table-responsive">
                             <table class="data-table">
@@ -1099,6 +1142,7 @@
                             </table>
                         </div>
                     </div>
+                    <div class="modal-backdrop" id="modal-gudang-summary"><div class="modal-card modal-card-wide"><div class="modal-header"><h3 id="gudang-summary-title">Ringkasan Dashboard</h3><button class="btn-icon" onclick="closeGudangSummary()"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body" id="gudang-summary-body"></div></div></div>
                 </section>
 
                 <!-- VIEW GUDANG TARGETS -->
@@ -1316,6 +1360,7 @@
 
                 <!-- VIEW SELLER DASHBOARD -->
                 <section id="view-seller-dashboard" class="app-view hidden">
+                    <div class="dashboard-hero seller-hero"><div><span class="eyebrow">PORTAL SELLER</span><h2>Kelola Stok & Booking</h2><p>Pantau stok tersedia, booking, dan status penjualan Anda.</p></div><button class="btn btn-secondary btn-sm" id="btn-seller-refresh"><i class="fa-solid fa-rotate"></i> Sinkronkan</button></div>
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon icon-green"><i class="fa-solid fa-boxes-stacked"></i></div>
@@ -1340,6 +1385,13 @@
                         </div>
                     </div>
 
+                    <div class="seller-dashboard-tools">
+                        <div><strong>Stok & Booking</strong><small>Gunakan pencarian untuk menemukan produk dengan cepat.</small></div>
+                        <div class="seller-search-wrap"><i class="fa-solid fa-magnifying-glass"></i><input id="seller-dashboard-search" class="form-control" placeholder="Cari produk, varian, atau SKU..."></div>
+                        <button class="btn btn-purple btn-sm" type="button" id="seller-refresh-data"><i class="fa-solid fa-rotate"></i> Sinkronkan</button>
+                    </div>
+
+                    <div class="seller-quick-actions"><button class="quick-dashboard-card" onclick="switchView('seller-stock-view')"><span class="quick-icon blue"><i class="fa-solid fa-boxes-stacked"></i></span><span><strong>Stok Gudang</strong><small>Lihat stok siap dibooking</small></span><i class="fa-solid fa-chevron-right"></i></button><button class="quick-dashboard-card" onclick="switchView('seller-booking-form')"><span class="quick-icon purple"><i class="fa-solid fa-bookmark"></i></span><span><strong>Booking Baru</strong><small>Reservasi stok</small></span><i class="fa-solid fa-chevron-right"></i></button><button class="quick-dashboard-card" onclick="switchView('seller-sales-status')"><span class="quick-icon green"><i class="fa-solid fa-bag-shopping"></i></span><span><strong>Status Penjualan</strong><small>Lihat closing</small></span><i class="fa-solid fa-chevron-right"></i></button></div>
                     <div class="card-table-wrapper">
                         <div class="table-toolbar">
                             <h3 style="font-size: 15px; font-weight: 700;">Booking Stok Aktif Saya</h3>
@@ -1367,9 +1419,7 @@
                 <!-- VIEW SELLER STOCK CATALOG -->
                 <section id="view-seller-stock-view" class="app-view hidden">
                     <div class="card-table-wrapper">
-                        <div class="table-toolbar">
-                            <h3 style="font-size: 15px; font-weight: 700;">Katalog Stok Gudang Siap Booking</h3>
-                        </div>
+                        <div class="table-toolbar seller-stock-toolbar"><div><h3 style="font-size: 15px; font-weight: 700;">Katalog Stok Gudang Siap Booking</h3><small class="text-muted">Cari produk, SKU, atau varian.</small></div><div class="seller-stock-filters"><input id="seller-stock-search" class="form-control" placeholder="Cari produk, SKU, varian..."><select id="seller-stock-category" class="form-control"><option value="">Semua Kategori</option></select></div></div>
                         <div class="table-responsive">
                             <table class="data-table">
                                 <thead>
@@ -1440,6 +1490,7 @@
                                         <th>Jumlah</th>
                                         <th>Masa Berlaku</th>
                                         <th>Status Booking</th>
+                                        <th class="text-right">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tbody-seller-booking-history">
@@ -1944,6 +1995,14 @@
                 <button class="btn btn-secondary modal-close" id="btn-confirm-cancel">Batal</button>
                 <button class="btn btn-danger" id="btn-confirm-proceed">Ya, Lanjutkan</button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL RINGKASAN GUDANG / SELLER -->
+    <div class="modal-backdrop" id="modal-role-summary">
+        <div class="modal-card modal-card-wide">
+            <div class="modal-header"><h3 id="role-summary-title">Ringkasan</h3><button class="btn-icon modal-close"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-body" id="role-summary-body"></div>
         </div>
     </div>
 
