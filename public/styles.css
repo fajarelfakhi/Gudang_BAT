@@ -6,9 +6,9 @@
 
 :root {
   /* Colors - Light Theme Default */
-  --bg-primary: #f8fafc;
+  --bg-primary: #f6f8fc;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f5f9;
+  --bg-tertiary: #f3f5f9;
   --bg-card: #ffffff;
   --bg-sidebar: #0f172a;
   
@@ -20,10 +20,10 @@
   --border-color: #e2e8f0;
   --border-hover: #cbd5e1;
 
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #eff6ff;
-  --primary-dark: #1e40af;
+  --primary: #6b7fe8;
+  --primary-hover: #5b6fd5;
+  --primary-light: #eef1ff;
+  --primary-dark: #5868b8;
   --accent: #3b82f6;
 
   --success: #10b981;
@@ -1227,3 +1227,6 @@ input, select, textarea {
 .permission-chip{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.03);font-size:12px;cursor:pointer}
 .permission-chip input{width:auto}
 @media(max-width:700px){.permissions-grid{grid-template-columns:1fr;max-height:220px}}
+
+/* GUDANG BAT Upgrade 11 */
+.sidebar.collapsed{width:78px}.sidebar.collapsed .sidebar-brand-text,.sidebar.collapsed .nav-group-label,.sidebar.collapsed .nav-link span,.sidebar.collapsed .user-info-mini{display:none}.sidebar.collapsed .sidebar-header{justify-content:center}.sidebar.collapsed .nav-link{justify-content:center}.sidebar.collapsed .sidebar-footer{padding:14px 10px}.stat-card-button{font:inherit;color:var(--text-main);text-align:left;width:100%;position:relative;cursor:pointer}.stat-card-button .stat-card-arrow{margin-left:auto;color:var(--text-muted);font-size:12px}.period-filter-card{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:15px 18px;margin-bottom:20px;border:1px solid var(--border-color);border-radius:16px;background:var(--bg-card);box-shadow:var(--shadow-sm)}.period-filter-card>div:first-child{display:flex;flex-direction:column;gap:2px;margin-right:auto}.period-filter-card small{color:var(--text-muted);font-size:11px}.period-filter-group{display:flex;gap:6px;flex-wrap:wrap}.btn-period-gudang{padding:8px 12px;border:1px solid var(--border-color);border-radius:10px;color:var(--text-muted);background:var(--bg-primary);font-size:12px;font-weight:700}.btn-period-gudang.active,.btn-period-gudang:hover{background:var(--primary-light);color:var(--primary);border-color:var(--primary)}.custom-date-range{display:flex;align-items:center;gap:8px;min-width:100%;padding-top:4px}.custom-date-range .form-control{max-width:170px;padding-left:12px}.summary-highlight{padding:20px;border-radius:16px;background:var(--primary-light);border:1px solid rgba(107,127,232,.25);display:flex;align-items:center;justify-content:space-between;gap:16px}.summary-highlight strong{font-size:24px;color:var(--primary)}.summary-list{margin-top:18px;display:flex;flex-direction:column;gap:8px}.summary-list>div{display:flex;justify-content:space-between;gap:15px;padding:11px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-primary)}.seller-stock-toolbar{align-items:flex-end}.seller-stock-filters{display:flex;gap:8px;min-width:min(520px,100%)}.seller-stock-filters .form-control{padding-left:12px}.seller-quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.seller-hero{background:linear-gradient(135deg,rgba(107,127,232,.10),rgba(139,92,246,.06))}@media(max-width:768px){.sidebar.collapsed{width:260px}.seller-stock-filters{min-width:100%;flex-direction:column}.seller-stock-toolbar{align-items:stretch}.seller-quick-actions{grid-template-columns:1fr}.summary-highlight{align-items:flex-start;flex-direction:column}.custom-date-range{flex-wrap:wrap}.custom-date-range .form-control{max-width:none;flex:1;min-width:130px}.period-filter-card{align-items:stretch}.period-filter-card>div:first-child{margin-right:0}.period-filter-group{width:100%}.btn-period-gudang{flex:1}}
