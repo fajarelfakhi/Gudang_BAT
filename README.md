@@ -54,3 +54,11 @@ Versi ini menambahkan snapshot otomatis, blokir overwrite state kosong/pengurang
 - Ditambahkan security log untuk jejak mutasi API.
 - Respons API diberi no-store untuk mengurangi data sensitif tersimpan cache browser.
 - Perbaikan duplikasi return pada mutateState.
+
+## Tahap 12 — Audit transaksi & keamanan operasional
+- Validasi integritas inventaris pada setiap mutation atomik.
+- Endpoint admin `GET /api/audit/integrity` untuk pemeriksaan tanpa mengubah data.
+- Perbaikan endpoint identitas publik agar logo perusahaan di halaman login dapat dibaca dengan benar.
+- Sidebar mobile ditutup otomatis setelah memilih menu.
+- Panel audit tersedia di Pengaturan Admin.
+- Tidak mereset atau menghapus data PostgreSQL yang sudah ada.
