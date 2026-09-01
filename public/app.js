@@ -39,6 +39,17 @@ let currentChartActivity = null;
 let currentChartStatus = null;
 let currentChartProductivity = null;
 let activePeriodFilter = 'today';
+let gudangPeriodFilter = 'today';
+let gudangCustomRange = { start: '', end: '' };
+function localDateKey(d=new Date()){ const x=new Date(d); const y=x.getFullYear(); const m=String(x.getMonth()+1).padStart(2,'0'); const day=String(x.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+function getGudangRange(){
+  const now=new Date(); const today=localDateKey(now);
+  if(gudangPeriodFilter==='today') return {start:today,end:today,label:'Hari Ini'};
+  if(gudangPeriodFilter==='week'){ const d=new Date(now); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return {start:localDateKey(d),end:today,label:'Pekan Ini'}; }
+  if(gudangPeriodFilter==='month'){ return {start:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`,end:today,label:'Bulan Ini'}; }
+  const start=gudangCustomRange.start||today, end=gudangCustomRange.end||today; return {start:start<=end?start:end,end:start<=end?end:start,label:`${start<=end?start:end} s/d ${start<=end?end:start}`};
+}
+function inDateRange(value, range){ const key=String(value||'').slice(0,10); return !!key && key>=range.start && key<=range.end; }
 let pendingConfirmAction = null;
 
 let saveQueue = Promise.resolve();
@@ -563,7 +574,8 @@ async function loginSuccess(user, token = null) {
   }
 
   applyRolePermissionsToUI();
-  setProfilePhotoUI((appState.userProfiles && appState.userProfiles[user.id] && appState.userProfiles[user.id].avatarData) || '');
+  await loadMyProfile();
+  setProfilePhotoUI(getProfileRecord().avatarData || '');
   renderCompanyLogo();
   updateNotificationBadges();
   showToast(`Login berhasil. Selamat datang, ${user.name}!`, "success");
@@ -708,7 +720,7 @@ async function submitSellerBooking(event) {
   if (!pId || !vId || qty <= 0) return showToast('Pilih produk, varian, dan jumlah booking.', 'warning');
   const btn=document.getElementById('btn-submit-booking'); if(btn) btn.disabled=true;
   try {
-    const res=await apiRequest('/api/bookings',{method:'POST',body:{productId:pId,variantId:vId,qty,note}});
+    const res=await apiRequest('/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({productId:pId,variantId:vId,qty,note})});
     await syncFetchState(true);
     document.getElementById('form-seller-booking')?.reset();
     showToast(res.message||'Booking berhasil dibuat dan stok direservasi.','success');
@@ -769,6 +781,10 @@ function initEventListeners() {
       sessionStorage.removeItem('gudangbat_user');
       sessionStorage.removeItem('gudangbat_token');
       sessionStorage.removeItem('gudangbat_state_version');
+      localStorage.removeItem('gudangbat_user');
+      localStorage.removeItem('gudangbat_token');
+      localStorage.removeItem('gudangbat_state_version');
+      isStateInitialized=false;
       const appLayout = document.getElementById('app-layout');
       const loginScreen = document.getElementById('login-screen');
       if (appLayout) appLayout.classList.add('hidden');
@@ -790,12 +806,18 @@ function initEventListeners() {
 
   const sidebarToggle = document.getElementById('sidebar-toggle');
   if (sidebarToggle) {
-    sidebarToggle.addEventListener('click', () => {
-      const sb = document.getElementById('sidebar');
-      if (sb) { sb.classList.toggle('mobile-open'); document.getElementById('sidebar-mobile-overlay')?.classList.toggle('active', sb.classList.contains('mobile-open')); }
-    });
+    sidebarToggle.addEventListener('click', () => { const sb=document.getElementById('sidebar'); if(!sb)return; if(window.innerWidth<=768){ sb.classList.toggle('mobile-open'); document.getElementById('sidebar-mobile-overlay')?.classList.toggle('active',sb.classList.contains('mobile-open')); } else { sb.classList.toggle('collapsed'); localStorage.setItem('gudangbat_sidebar_collapsed',sb.classList.contains('collapsed')?'1':'0'); } });
   }
+  const sidebar=document.getElementById('sidebar'); if(sidebar && localStorage.getItem('gudangbat_sidebar_collapsed')==='1' && window.innerWidth>768) sidebar.classList.add('collapsed');
+  window.addEventListener('resize',()=>{const sb=document.getElementById('sidebar');if(!sb)return;if(window.innerWidth>768){sb.classList.remove('mobile-open');document.getElementById('sidebar-mobile-overlay')?.classList.remove('active');if(localStorage.getItem('gudangbat_sidebar_collapsed')==='1')sb.classList.add('collapsed');}});
   document.getElementById('sidebar-mobile-overlay')?.addEventListener('click', () => { document.getElementById('sidebar')?.classList.remove('mobile-open'); document.getElementById('sidebar-mobile-overlay')?.classList.remove('active'); });
+
+  document.querySelectorAll('.btn-period-gudang').forEach(btn=>btn.addEventListener('click',()=>{gudangPeriodFilter=btn.dataset.period||'today';document.querySelectorAll('.btn-period-gudang').forEach(b=>b.classList.toggle('active',b===btn));document.getElementById('gudang-custom-date-range')?.classList.toggle('hidden',gudangPeriodFilter!=='custom');if(gudangPeriodFilter!=='custom')renderGudangDashboard();}));
+  document.getElementById('btn-gudang-apply-date')?.addEventListener('click',()=>{gudangCustomRange.start=document.getElementById('gudang-filter-start')?.value||'';gudangCustomRange.end=document.getElementById('gudang-filter-end')?.value||'';if(!gudangCustomRange.start||!gudangCustomRange.end)return showToast('Pilih tanggal mulai dan tanggal akhir.','warning');renderGudangDashboard();});
+  document.querySelectorAll('[data-gudang-summary]').forEach(el=>el.addEventListener('click',()=>openGudangSummary(el.dataset.gudangSummary)));
+  document.getElementById('seller-stock-search')?.addEventListener('input',renderSellerStockView);
+  document.getElementById('seller-stock-category')?.addEventListener('change',renderSellerStockView);
+  document.getElementById('btn-seller-refresh')?.addEventListener('click',async()=>{await syncFetchState();renderSellerDashboard();});
 
   const themeToggle = document.getElementById('btn-theme-toggle');
   if (themeToggle) {
@@ -910,6 +932,11 @@ function initEventListeners() {
   const workProductSelect = document.getElementById('wrk-product-id');
   if (workProductSelect) workProductSelect.addEventListener('change', updateWorkVariantOptions);
 
+  document.querySelectorAll('.btn-period-gudang').forEach(btn=>btn.addEventListener('click',()=>{gudangPeriodFilter=btn.dataset.period||'today';document.querySelectorAll('.btn-period-gudang').forEach(b=>b.classList.toggle('active',b===btn));const box=document.getElementById('gudang-custom-date-range');if(box)box.classList.toggle('hidden',gudangPeriodFilter!=='custom');if(gudangPeriodFilter!=='custom')renderGudangDashboard();}));
+  document.getElementById('btn-gudang-apply-date')?.addEventListener('click',()=>{gudangCustomRange.start=document.getElementById('gudang-filter-start')?.value||'';gudangCustomRange.end=document.getElementById('gudang-filter-end')?.value||'';if(!gudangCustomRange.start||!gudangCustomRange.end)return showToast('Pilih tanggal mulai dan tanggal akhir.','warning');renderGudangDashboard();});
+  document.querySelectorAll('[data-gudang-summary]').forEach(el=>el.addEventListener('click',()=>openGudangSummary(el.dataset.gudangSummary)));
+  document.getElementById('seller-refresh-data')?.addEventListener('click',()=>syncFetchState());
+  document.getElementById('seller-dashboard-search')?.addEventListener('input',()=>renderSellerStockView());
   initModalActions();
 }
 
@@ -1968,6 +1995,20 @@ async function editUser(id){
 async function deleteUser(id){ showConfirmDialog('Hapus Akun','Hapus akun ini secara permanen?',async()=>{try{const r=await apiRequest(`${API_BASE}/users/${id}`,{method:'DELETE'});showToast(r.message||'Akun dihapus.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menghapus akun.','danger');}}); }
 function renderUserPermissionChecks(selected=[]){ const box=document.getElementById('usr-permissions'); if(!box)return; box.innerHTML=ALL_PERMISSIONS.map(p=>`<label class="permission-chip"><input type="checkbox" value="${p.id}" ${selected.includes(p.id)?'checked':''}> ${p.label}</label>`).join(''); }
 
+async function runIntegrityAudit(){
+  const box=document.getElementById('integrity-audit-result');
+  if(box) box.innerHTML='<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Memeriksa konsistensi data...</span>';
+  try{
+    const r=await apiRequest(`${API_BASE}/audit/integrity`);
+    if(!box)return;
+    if(r.healthy){
+      box.innerHTML=`<div class="audit-ok"><i class="fa-solid fa-circle-check"></i><div><strong>Data sehat.</strong><br><small>Audit ${new Date(r.checkedAt).toLocaleString('id-ID')} • ${r.totals.products} produk • ${r.totals.inventoryRecords} record stok • ${r.totals.activeBookings} booking aktif</small></div></div>`;
+    }else{
+      box.innerHTML=`<div class="audit-warning"><i class="fa-solid fa-triangle-exclamation"></i><div><strong>Ditemukan ${r.issues.length} indikasi masalah.</strong><ul>${r.issues.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul><small>Jangan melakukan perubahan massal sebelum data diperiksa.</small></div></div>`;
+    }
+  }catch(e){if(box)box.innerHTML=`<div class="audit-warning"><i class="fa-solid fa-circle-xmark"></i> Audit gagal: ${escapeHtml(e.message||'Terjadi kesalahan.')}</div>`;}
+}
+
 function renderAdminActivityLogs() {
   const tbody = document.getElementById('tbody-activity-logs-list');
   if (!tbody) return;
@@ -1991,59 +2032,9 @@ function renderAdminActivityLogs() {
 // ==========================================================================
 // 11. WORKER GUDANG & SELLER VIEWS
 // ==========================================================================
-function renderGudangDashboard() {
-  if (!currentUser) return;
-  const workerReports = (appState.workReports || []).filter(r => r.workerId === currentUser.id);
-  const todayStr = new Date().toISOString().slice(0,10);
-  const todayReports = workerReports.filter(r => r.createdAt && r.createdAt.startsWith(todayStr));
-
-  const todayDone = todayReports.reduce((acc, r) => acc + r.qty, 0);
-  const todayWage = todayReports.reduce((acc, r) => acc + (r.totalWage || 0), 0);
-
-  const elDone = document.getElementById('gudang-stat-today-done');
-  if (elDone) elDone.innerText = `${todayDone} Unit`;
-
-  const elWage = document.getElementById('gudang-stat-today-wage');
-  if (elWage) elWage.innerText = `Rp ${todayWage.toLocaleString('id-ID')}`;
-
-  const tbody = document.getElementById('tbody-gudang-today-targets');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const targets = (appState.workTargets || []).filter(t => t.date === todayStr && t.assignedToUserId === currentUser.id);
-  if (targets.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center">Belum ada target khusus ditugaskan hari ini.</td></tr>`;
-    return;
-  }
-
-  targets.forEach(t => {
-    const wt = (appState.workTypes || []).find(x => x.id === t.workTypeId);
-    const p = (appState.products || []).find(x => x.id === t.productId);
-    const v = (p ? p.variants : []).find(x => x.id === t.variantId);
-
-    const doneCount = todayReports
-      .filter(r => r.workTypeId === t.workTypeId && r.productId === t.productId && r.variantId === t.variantId)
-      .reduce((acc, r) => acc + r.qty, 0);
-
-    const pct = Math.min(100, Math.round((doneCount / t.targetQty) * 100));
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><strong>${wt ? wt.name : '-'}</strong></td>
-      <td>${p ? p.name : '-'} (${v ? v.name : '-'})</td>
-      <td>${t.targetQty} Unit</td>
-      <td><strong class="text-success">${doneCount} Unit</strong></td>
-      <td>
-        <div style="font-size:12px; font-weight:700;">${pct}%</div>
-        <div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div>
-      </td>
-      <td class="text-right">
-        <button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}', '${t.productId}', '${t.variantId}')">Lapor Kerja</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
+function renderGudangDashboard(){if(!currentUser)return;const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range));const targetQty=targets.reduce((s,t)=>s+Number(t.targetQty||0),0),doneQty=reports.reduce((s,r)=>s+Number(r.qty||0),0),wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0),unpaid=getWorkerAvailableWage(currentUser.id);const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerText=v;};set('gudang-stat-today-target',`${targetQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-done',`${doneQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-wage',formatRupiah(wage));set('gudang-stat-unpaid',formatRupiah(unpaid));set('gudang-period-label',range.label);const tbody=document.getElementById('tbody-gudang-today-targets');if(!tbody)return;tbody.innerHTML='';if(!targets.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center">Belum ada target pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}targets.forEach(t=>{const wt=(appState.workTypes||[]).find(x=>x.id===t.workTypeId),p=(appState.products||[]).find(x=>x.id===t.productId),v=(p?.variants||[]).find(x=>x.id===t.variantId),done=reports.filter(r=>r.workTypeId===t.workTypeId&&r.productId===t.productId&&r.variantId===t.variantId&&(r.createdAt||'').slice(0,10)===t.date).reduce((s,r)=>s+Number(r.qty||0),0),pct=t.targetQty?Math.min(100,Math.round(done/t.targetQty*100)):0,tr=document.createElement('tr');tr.innerHTML=`<td>${t.date}<br><strong>${wt?.name||'-'}</strong></td><td>${p?.name||'-'} (${v?.name||'-'})</td><td>${Number(t.targetQty||0)} Unit</td><td><strong class="text-success">${done} Unit</strong></td><td><div class="progress-label">${pct}%</div><div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div></td><td class="text-right"><button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}','${t.productId}','${t.variantId}')">Lapor Kerja</button></td>`;tbody.appendChild(tr);});}
+function openGudangSummary(type){const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range)),body=document.getElementById('gudang-summary-body'),title=document.getElementById('gudang-summary-title');if(!body)return;const totalTarget=targets.reduce((s,x)=>s+Number(x.targetQty||0),0),totalDone=reports.reduce((s,x)=>s+Number(x.qty||0),0),totalWage=reports.reduce((s,x)=>s+Number(x.totalWage||0),0);if(title)title.textContent={target:'Ringkasan Target Pekerjaan',done:'Ringkasan Pekerjaan Selesai',wage:'Ringkasan Pendapatan',unpaid:'Upah Belum Dicairkan'}[type]||'Ringkasan Dashboard';if(type==='unpaid'){body.innerHTML=`<div class="summary-highlight"><span>Saldo yang masih tersedia untuk dicairkan</span><strong>${formatRupiah(getWorkerAvailableWage(currentUser.id))}</strong></div><p class="text-muted" style="margin-top:12px">Saldo ini adalah akumulasi seluruh upah yang sudah diperoleh, dikurangi pengajuan yang masih diproses/disetujui dan pencairan yang sudah dibayar.</p><div class="report-actions"><button class="btn btn-primary" onclick="closeGudangSummary();switchView('gudang-payout-request')">Ajukan Pencairan</button></div>`;}else{body.innerHTML=`<div class="variant-report-grid"><div><small>Total Target</small><strong>${totalTarget.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Selesai</small><strong>${totalDone.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Upah</small><strong>${formatRupiah(totalWage)}</strong></div></div><div class="summary-list">${reports.slice(0,20).map(r=>`<div><span>${r.workTypeName||'-'} — ${r.productName||'-'} (${r.variantName||'-'})</span><strong>${Number(r.qty||0)} Unit • ${formatRupiah(r.totalWage||0)}</strong></div>`).join('')||'<p class="text-muted">Belum ada laporan pada periode ini.</p>'}</div>`;}document.getElementById('modal-gudang-summary')?.classList.add('active');}
+function closeGudangSummary(){document.getElementById('modal-gudang-summary')?.classList.remove('active');}
 
 function renderGudangTargets() {
   const tbody = document.getElementById('tbody-gudang-all-targets');
@@ -2189,33 +2180,7 @@ function renderSellerDashboard() {
   });
 }
 
-function renderSellerStockView() {
-  const tbody = document.getElementById('tbody-seller-stock-catalog');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const products = appState.products || [];
-  const inventory = appState.inventory || [];
-
-  products.forEach(p => {
-    (p.variants || []).forEach(v => {
-      const inv = inventory.find(i => i.productId === p.id && i.variantId === v.id) || { physicalStock:0, bookedStock:0 };
-      const avail = Math.max(0, inv.physicalStock - inv.bookedStock);
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><strong>${p.name}</strong><br><small class="text-primary">${v.name}</small></td>
-        <td><code>${v.sku || p.sku}</code></td>
-        <td><strong class="text-success" style="font-size:16px;">${avail} ${p.unit}</strong></td>
-        <td>${p.warehouseLocation}</td>
-        <td class="text-right">
-          <button class="btn btn-purple btn-sm" style="background:var(--purple); color:#fff;" onclick="quickBookProduct('${p.id}', '${v.id}')">Booking Sekarang</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    });
-  });
-}
+function renderSellerStockView(){const tbody=document.getElementById('tbody-seller-stock-catalog');if(!tbody)return;tbody.innerHTML='';const q=(document.getElementById('seller-stock-search')?.value||'').trim().toLowerCase(),cat=document.getElementById('seller-stock-category')?.value||'',products=(appState.products||[]).filter(p=>(!cat||p.categoryId===cat));const inventory=appState.inventory||[];let rows=0;products.forEach(p=>(p.variants||[]).forEach(v=>{const text=`${p.name} ${v.name} ${v.sku||p.sku||''}`.toLowerCase();if(q&&!text.includes(q))return;const inv=inventory.find(i=>i.productId===p.id&&i.variantId===v.id)||{physicalStock:0,bookedStock:0},avail=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0));rows++;const tr=document.createElement('tr');tr.innerHTML=`<td><strong>${p.name}</strong><br><small class="text-primary">${v.name}</small></td><td><code>${v.sku||p.sku||'-'}</code></td><td><strong class="text-success" style="font-size:16px;">${avail} ${p.unit||'Unit'}</strong></td><td>${p.warehouseLocation||'-'}</td><td class="text-right"><button class="btn btn-purple btn-sm" style="background:var(--purple);color:#fff;" ${avail<=0?'disabled':''} onclick="quickBookProduct('${p.id}','${v.id}')">Booking Sekarang</button></td>`;tbody.appendChild(tr);}));if(!rows)tbody.innerHTML=`<tr><td colspan="5" class="text-center">Tidak ada stok yang sesuai pencarian.</td></tr>`;const catSel=document.getElementById('seller-stock-category');if(catSel&&catSel.options.length<=1)catSel.innerHTML='<option value="">Semua Kategori</option>'+(appState.categories||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 
 function renderSellerBookingHistory() {
   const tbody = document.getElementById('tbody-seller-booking-history');
@@ -2225,23 +2190,19 @@ function renderSellerBookingHistory() {
   if (!currentUser) return;
   const list = (appState.sellerBookings || []).filter(b => b.sellerId === currentUser.id);
   if (list.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center">Belum ada riwayat booking.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center">Belum ada riwayat booking.</td></tr>`;
     return;
   }
-
   list.forEach(b => {
+    const canCancel=['Menunggu Persetujuan','Aktif'].includes(b.status);
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><code>${b.bookingNo}</code></td>
-      <td>${formatDateTime(b.createdAt)}</td>
-      <td>${b.productName} (${b.variantName})</td>
-      <td><strong>${b.qty} Unit</strong></td>
-      <td>${formatDateTime(b.expiresAt)}</td>
-      <td><span class="badge badge-purple">${b.status}</span></td>
-    `;
+      <td><code>${b.bookingNo}</code></td><td>${formatDateTime(b.createdAt)}</td><td>${b.productName} (${b.variantName})</td><td><strong>${b.qty} Unit</strong></td><td>${formatDateTime(b.expiresAt)}</td><td><span class="badge ${b.status==='Aktif'?'badge-success':b.status==='Dibatalkan'?'badge-danger':'badge-warning'}">${b.status}</span></td><td class="text-right">${canCancel?`<button class="btn btn-danger btn-sm" onclick="cancelSellerBooking('${b.id}')"><i class="fa-solid fa-xmark"></i> Batalkan</button>`:'-'}</td>`;
     tbody.appendChild(tr);
   });
 }
+
+async function cancelSellerBooking(id){showConfirmDialog('Batalkan Booking','Stok yang dibooking akan dilepas kembali ke stok tersedia.',async()=>{try{const r=await apiRequest(`${API_BASE}/bookings/${encodeURIComponent(id)}/cancel`,{method:'PATCH'});await syncFetchState(true);renderSellerDashboard();renderSellerBookingHistory();showToast(r.message||'Booking dibatalkan.','success');}catch(e){showToast(e.message||'Gagal membatalkan booking.','danger');}});}
 
 function renderSellerSalesStatus() {
   const tbody = document.getElementById('tbody-seller-sales-history');
@@ -2986,16 +2947,12 @@ async function renderAdminDashboard(){
 }
 
 function getProfileRecord(){ if(!currentUser)return {}; return appState.userProfiles?.[currentUser.id]||{}; }
-function renderProfileView(){
-  if(!currentUser)return; const profile={...currentUser,...getProfileRecord()};
-  document.querySelectorAll('[data-profile-name]').forEach(e=>e.textContent=profile.name||currentUser.name); document.querySelectorAll('[data-profile-role]').forEach(e=>e.textContent=(profile.role||currentUser.role||'').toUpperCase());
-  document.querySelectorAll('[data-profile-field="name"]').forEach(e=>e.value=profile.name||''); document.querySelectorAll('[data-profile-field="username"]').forEach(e=>e.value=profile.username||''); document.querySelectorAll('[data-profile-field="email"]').forEach(e=>e.value=profile.email||''); document.querySelectorAll('[data-profile-field="phone"]').forEach(e=>e.value=profile.phone||'');
-  setProfilePhotoUI(profile.avatarData||'');
-}
-function setProfilePhotoUI(data){ document.querySelectorAll('[data-profile-image]').forEach(img=>{img.src=data||''; img.style.display=data?'block':'none';}); document.querySelectorAll('[data-profile-fallback]').forEach(el=>{el.style.display=data?'none':'flex'; el.textContent=(currentUser?.name||'U').trim().charAt(0).toUpperCase();}); const mini=document.getElementById('user-avatar'); if(mini){if(data){mini.innerHTML=`<img src="${data}" alt="Avatar">`; }else mini.textContent=(currentUser?.name||'U').charAt(0).toUpperCase();}}
-async function saveProfileForm(form){ if(!currentUser)return; if(!appState.userProfiles)appState.userProfiles={}; const rec=appState.userProfiles[currentUser.id]||{}; ['name','username','email','phone'].forEach(k=>{const el=form.querySelector(`[data-profile-field="${k}"]`); if(el)rec[k]=el.value.trim();}); appState.userProfiles[currentUser.id]=rec; const u=(appState.users||[]).find(x=>x.id===currentUser.id); if(u){Object.assign(u,rec); currentUser={...currentUser,...rec}; sessionStorage.setItem('gudangbat_user',JSON.stringify(currentUser));} await persistAppState('UPDATE_PROFILE','Memperbarui profil dan informasi akun.'); const ne=document.getElementById('user-display-name'); if(ne) ne.innerText=currentUser.name; const ae=document.getElementById('user-avatar'); if(ae && !getProfileRecord().avatarData) ae.innerText=currentUser.name.charAt(0).toUpperCase(); renderProfileView(); showToast('Profil berhasil diperbarui.','success'); }
+async function loadMyProfile(){if(!currentUser)return{};try{const r=await apiRequest(`${API_BASE}/me/profile`);const p=r.data||{};if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),...p,avatarData:p.avatarData||getProfileRecord().avatarData||''};currentUser={...currentUser,name:p.name||currentUser.name,username:p.username||currentUser.username,email:p.email||currentUser.email||'',phone:p.phone||currentUser.phone||''};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));return appState.userProfiles[currentUser.id];}catch{return getProfileRecord();}}
+async function renderProfileView(){if(!currentUser)return;const p=await loadMyProfile(),profile={...currentUser,...p};document.querySelectorAll('[data-profile-name]').forEach(e=>e.textContent=profile.name||currentUser.name);document.querySelectorAll('[data-profile-role]').forEach(e=>e.textContent=(currentUser.role||'').toUpperCase());document.querySelectorAll('[data-profile-field="name"]').forEach(e=>e.value=profile.name||'');document.querySelectorAll('[data-profile-field="username"]').forEach(e=>e.value=profile.username||'');document.querySelectorAll('[data-profile-field="email"]').forEach(e=>e.value=profile.email||'');document.querySelectorAll('[data-profile-field="phone"]').forEach(e=>e.value=profile.phone||'');setProfilePhotoUI(profile.avatarData||'');}
+function setProfilePhotoUI(data){document.querySelectorAll('[data-profile-image]').forEach(img=>{img.src=data||'';img.style.display=data?'block':'none';});document.querySelectorAll('[data-profile-fallback]').forEach(el=>{el.style.display=data?'none':'flex';el.textContent=(currentUser?.name||'U').trim().charAt(0).toUpperCase();});const mini=document.getElementById('user-avatar');if(mini){if(data)mini.innerHTML=`<img src="${data}" alt="Avatar">`;else mini.textContent=(currentUser?.name||'U').charAt(0).toUpperCase();}}
+async function saveProfileForm(form){if(!currentUser)return;const payload={};['name','username','email','phone'].forEach(k=>{const el=form.querySelector(`[data-profile-field="${k}"]`);if(el)payload[k]=el.value.trim();});try{const res=await apiRequest(`${API_BASE}/me/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentUser={...currentUser,...(res.user||{})};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),...payload};document.getElementById('user-display-name').textContent=currentUser.name;renderProfileView();showToast(res.message||'Profil berhasil diperbarui.','success');}catch(err){showToast(err.message||'Gagal memperbarui profil.','danger');}}
 document.addEventListener('submit',e=>{if(e.target.matches('[data-profile-form]')){e.preventDefault();saveProfileForm(e.target);}});
-document.addEventListener('change',e=>{if(e.target.matches('[data-profile-upload]')){const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024)return showToast('Ukuran foto maksimal 2 MB.','warning');const r=new FileReader();r.onload=async()=>{if(!appState.userProfiles)appState.userProfiles={}; const rec=appState.userProfiles[currentUser.id]||{};rec.avatarData=r.result;appState.userProfiles[currentUser.id]=rec;setProfilePhotoUI(r.result);await persistAppState('UPDATE_FOTO_PROFILE','Mengubah foto profil.');showToast('Foto profil berhasil diperbarui.','success');};r.readAsDataURL(f);}});
+document.addEventListener('change',e=>{if(e.target.matches('[data-profile-upload]')){const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024)return showToast('Ukuran foto maksimal 2 MB.','warning');if(!f.type.startsWith('image/'))return showToast('Pilih file gambar.','warning');const r=new FileReader();r.onload=async()=>{try{const res=await apiRequest(`${API_BASE}/me/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatarData:r.result})});setProfilePhotoUI(r.result);if(res.user){currentUser={...currentUser,...res.user};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));}if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),avatarData:r.result};showToast('Foto profil berhasil diperbarui.','success');}catch(err){showToast(err.message||'Gagal menyimpan foto profil.','danger');}};r.readAsDataURL(f);}});
 
 let barcodeStream=null, barcodeTimer=null;
 async function startCameraScanner(){
