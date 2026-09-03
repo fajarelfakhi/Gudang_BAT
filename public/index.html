@@ -1547,6 +1547,8 @@
     <!-- ==========================================================================
          3. MODALS FORM & SIMULATORS
          ========================================================================== -->
+    <input type="file" id="admin-stock-photo-input" accept="image/*" hidden>
+
     <!-- MODAL TAMBAH/EDIT PRODUK -->
     <div class="modal-backdrop" id="modal-product">
         <div class="modal-card">
@@ -1590,6 +1592,7 @@
                     <div class="form-group">
                         <label class="form-label">Varian Produk (Pisahkan dengan koma)</label>
                         <input type="text" id="prd-variants-input" class="form-control" placeholder="Contoh: 2 Ton, 3 Ton, 5 Ton, 10 Ton">
+                    <div class="form-group"><label class="form-label">Foto Produk</label><input type="url" id="prd-image-url" class="form-control" placeholder="URL foto (opsional)"><small class="text-muted">Admin dapat mengganti foto dari menu Stok Barang.</small></div>
                         <small style="color: var(--text-muted);">Admin dapat membuat varian dinamis baru kapan saja.</small>
                     </div>
                 </form>
