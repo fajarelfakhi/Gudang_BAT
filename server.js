@@ -35,7 +35,14 @@ async function writeSecurityLog(userId, action, detail, req) {
   try { await pool.query(`INSERT INTO security_logs(user_id,action,detail,ip,user_agent) VALUES($1,$2,$3,$4,$5)`,[userId||null,String(action),String(detail||''),String(req.ip||''),String(req.get('user-agent')||'').slice(0,500)]); } catch(e) {}
 }
 
-function publicUser(u) { return { id:u.id, username:u.username, name:u.name, role:u.role, email:u.email || '', phone:u.phone || '', status:u.status, requestedRole:u.requested_role || u.requestedRole || '', permissions:Array.isArray(u.permissions)?u.permissions:(u.permissions||[]), avatarData:u.avatar_data || u.avatarData || '' }; }
+function normalizeRole(role){
+  const r=String(role||'').trim().toLowerCase();
+  if(['admin','administrator','admin utama','administrator utama'].includes(r)) return 'admin';
+  if(['gudang','pekerja gudang','worker','warehouse','warehouse worker','staff gudang'].includes(r)) return 'gudang';
+  if(['seller','seller / penjual','penjual','sales'].includes(r)) return 'seller';
+  return r || 'seller';
+}
+function publicUser(u) { return { id:u.id, username:u.username, name:u.name, role:normalizeRole(u.role), email:u.email || '', phone:u.phone || '', status:u.status, requestedRole:u.requested_role || u.requestedRole || '', permissions:Array.isArray(u.permissions)?u.permissions:(u.permissions||[]), avatarData:u.avatar_data || u.avatarData || '' }; }
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: ['*'],
   gudang: ['dashboard.view','stocks.view','inventory.qc','work.reports','wages.manage'],
@@ -56,9 +63,9 @@ async function auth(req,res,next) {
     const r=await pool.query('SELECT id,username,name,role,email,phone,status,permissions,avatar_data FROM users WHERE id=$1 LIMIT 1',[decoded.id]);
     const u=r.rows[0];
     if(!u || u.status!=='active') return res.status(401).json({success:false,message:'Akun sudah tidak aktif. Silakan login kembali.'});
-    const rolePermissions=await getRolePermissions(u.role);
+    const normalizedRole=normalizeRole(u.role); const rolePermissions=await getRolePermissions(normalizedRole);
     const permissions=(Array.isArray(u.permissions)&&u.permissions.length?u.permissions:rolePermissions);
-    req.user={...publicUser(u), permissions}; next();
+    req.user={...publicUser({...u,role:normalizedRole}), permissions}; next();
   } catch { return res.status(401).json({success:false,message:'Sesi tidak valid atau sudah berakhir.'}); }
 }
 function requirePermission(permission) {
@@ -494,7 +501,7 @@ app.put('/api/products/:id', auth, requirePermission('products.manage'), async (
   try { const payload=req.body||{}; const {result,version}=await mutateState(state=>{
     state.products=state.products||[]; state.categories=state.categories||[]; state.inventory=state.inventory||[]; const p=state.products.find(x=>x.id===req.params.id); if(!p)throw Object.assign(new Error('Produk tidak ditemukan.'),{status:404});
     const name=String(payload.name||'').trim(), sku=String(payload.sku||'').trim(), categoryId=String(payload.categoryId||''); if(!name||!sku||!categoryId)throw Object.assign(new Error('Nama produk, kategori dan SKU wajib diisi.'),{status:400}); if(!state.categories.some(c=>c.id===categoryId))throw Object.assign(new Error('Kategori tidak ditemukan.'),{status:400}); if(state.products.some(x=>x.id!==p.id&&String(x.sku).toLowerCase()===sku.toLowerCase()))throw Object.assign(new Error('SKU produk sudah digunakan.'),{status:409});
-    const incoming=Array.isArray(payload.variants)&&payload.variants.length?payload.variants:[{name:'Standard'}]; const variants=incoming.map((v,i)=>{const old=(p.variants||[]).find(x=>x.id===v.id||x.name===v.name);return {id:old?.id||v.id||'VAR-'+Date.now()+'-'+i,name:String(v.name||'Standard').trim(),sku:v.sku||old?.sku||`${sku}-${i+1}`};}); Object.assign(p,{categoryId,name,sku,description:String(payload.description||''),unit:String(payload.unit||'Unit'),warehouseLocation:String(payload.warehouseLocation||'Rak Gudang Utama'),minStock:Number(payload.minStock||10),variants,updatedAt:new Date().toISOString()}); variants.forEach(v=>{if(!state.inventory.some(i=>i.productId===p.id&&i.variantId===v.id))state.inventory.push({productId:p.id,variantId:v.id,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0});}); return p;
+    const incoming=Array.isArray(payload.variants)&&payload.variants.length?payload.variants:[{name:'Standard'}]; const variants=incoming.map((v,i)=>{const old=(p.variants||[]).find(x=>x.id===v.id||x.name===v.name);return {id:old?.id||v.id||'VAR-'+Date.now()+'-'+i,name:String(v.name||'Standard').trim(),sku:v.sku||old?.sku||`${sku}-${i+1}`};}); Object.assign(p,{categoryId,name,sku,description:String(payload.description||''),unit:String(payload.unit||'Unit'),warehouseLocation:String(payload.warehouseLocation||'Rak Gudang Utama'),minStock:Number(payload.minStock||10),imageUrl:payload.imageUrl!==undefined?String(payload.imageUrl||''):String(p.imageUrl||''),variants,updatedAt:new Date().toISOString()}); variants.forEach(v=>{if(!state.inventory.some(i=>i.productId===p.id&&i.variantId===v.id))state.inventory.push({productId:p.id,variantId:v.id,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0});}); return p;
   }); res.json({success:true,message:'Produk berhasil diperbarui.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui produk.'});}
 });

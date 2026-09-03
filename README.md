@@ -62,3 +62,6 @@ Versi ini menambahkan snapshot otomatis, blokir overwrite state kosong/pengurang
 - Sidebar mobile ditutup otomatis setelah memilih menu.
 - Panel audit tersedia di Pengaturan Admin.
 - Tidak mereset atau menghapus data PostgreSQL yang sudah ada.
+
+
+Upgrade tambahan: perbaikan role canonical (admin/gudang/seller), foto produk admin pada menu stok, branding login lebih besar, dan profil admin lebih profesional. Tidak ada reset database.
