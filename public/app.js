@@ -92,8 +92,9 @@ const VIEW_PERMISSIONS = {
   'gudang-targets':'dashboard.view','gudang-work-report':'work.reports','gudang-work-history':'work.reports','gudang-earnings':'wages.manage','gudang-payout-request':'wages.manage','gudang-profile':'dashboard.view',
   'seller-stock-view':'stocks.view','seller-booking-form':'seller.booking','seller-booking-history':'seller.booking','seller-sales-status':'sales.closing','seller-profile':'dashboard.view'
 };
-function getCurrentPermissions(){ return currentUser?.permissions || appState.rbac?.rolePermissions?.[currentUser?.role] || []; }
-function hasPermission(permission){ const p=getCurrentPermissions(); return currentUser?.role==='admin' || p.includes('*') || p.includes(permission); }
+function normalizeRole(role){const r=String(role||'').trim().toLowerCase();if(['admin','administrator','admin utama','administrator utama'].includes(r))return 'admin';if(['gudang','pekerja gudang','worker','warehouse','warehouse worker','staff gudang'].includes(r))return 'gudang';if(['seller','seller / penjual','penjual','sales'].includes(r))return 'seller';return r||'seller';}
+function getCurrentPermissions(){if(!currentUser)return [];const individual=Array.isArray(currentUser.permissions)?currentUser.permissions:[];return individual.length?individual:(appState.rbac?.rolePermissions?.[normalizeRole(currentUser.role)]||[]);}
+function hasPermission(permission){const p=getCurrentPermissions();return normalizeRole(currentUser?.role)==='admin'||p.includes('*')||p.includes(permission);}
 function applyRolePermissionsToUI(){
   document.querySelectorAll('.nav-link[data-view]').forEach(btn=>{ const perm=VIEW_PERMISSIONS[btn.dataset.view]; btn.classList.toggle('hidden-by-permission', !!perm && !hasPermission(perm)); });
   const first=[...document.querySelectorAll('.sidebar-nav:not(.hidden) .nav-link:not(.hidden-by-permission)')][0];
@@ -525,9 +526,10 @@ function resetLoginBtn(submitBtn, originalHtml) {
 }
 
 async function loginSuccess(user, token = null) {
-  currentUser = user;
+  currentUser = user || null;
   if (token) localStorage.setItem('gudangbat_token', token);
-  try { const me=await apiRequest(`${API_BASE}/me`); if(me?.user) user={...user,...me.user}; } catch {}
+  try { const me=await apiRequest(`${API_BASE}/me`); if(me?.user) user={...user,...me.user}; } catch(e) { console.warn('Gagal memuat identitas terbaru:',e?.message||e); }
+  user={...user,role:normalizeRole(user?.role)}; currentUser=user;
   localStorage.setItem('gudangbat_user', JSON.stringify(user));
   
   // Wajib muat state dari server terlebih dahulu sebelum menampilkan UI!
@@ -558,20 +560,11 @@ async function loginSuccess(user, token = null) {
   if (navGudang) navGudang.classList.add('hidden');
   if (navSeller) navSeller.classList.add('hidden');
 
-  if (user.role === 'admin') {
-    if (navAdmin) navAdmin.classList.remove('hidden');
-    switchView('admin-dashboard');
-  } else if (user.role === 'gudang') {
-    if (navGudang) navGudang.classList.remove('hidden');
-    switchView('gudang-dashboard');
-  } else if (user.role === 'seller') {
-    if (navSeller) navSeller.classList.remove('hidden');
-    switchView('seller-dashboard');
-  } else {
-    // Custom Role: gunakan shell menu yang difilter oleh matriks hak akses
-    if (navAdmin) navAdmin.classList.remove('hidden');
-    switchView('admin-dashboard');
-  }
+  const normalizedRole=normalizeRole(user.role);
+  if (normalizedRole === 'admin') { if (navAdmin) navAdmin.classList.remove('hidden'); switchView('admin-dashboard'); }
+  else if (normalizedRole === 'gudang') { if (navGudang) navGudang.classList.remove('hidden'); switchView('gudang-dashboard'); }
+  else if (normalizedRole === 'seller') { if (navSeller) navSeller.classList.remove('hidden'); switchView('seller-dashboard'); }
+  else { const perms=getCurrentPermissions(); if(perms.includes('seller.booking')&&!perms.includes('work.reports')){if(navSeller)navSeller.classList.remove('hidden');switchView('seller-dashboard');}else if(perms.includes('work.reports')){if(navGudang)navGudang.classList.remove('hidden');switchView('gudang-dashboard');}else{if(navAdmin)navAdmin.classList.remove('hidden');switchView('admin-dashboard');} }
 
   applyRolePermissionsToUI();
   await loadMyProfile();
@@ -818,6 +811,8 @@ function initEventListeners() {
   document.getElementById('seller-stock-search')?.addEventListener('input',renderSellerStockView);
   document.getElementById('seller-stock-category')?.addEventListener('change',renderSellerStockView);
   document.getElementById('btn-seller-refresh')?.addEventListener('click',async()=>{await syncFetchState();renderSellerDashboard();});
+
+  const adminStockPhotoInput=document.getElementById('admin-stock-photo-input'); adminStockPhotoInput?.addEventListener('change',()=>{const f=adminStockPhotoInput.files?.[0],id=adminStockPhotoInput.dataset.productId;if(f&&id)saveAdminProductPhoto(f,id);});
 
   const themeToggle = document.getElementById('btn-theme-toggle');
   if (themeToggle) {
@@ -1440,6 +1435,10 @@ function renderAdminProducts() {
   });
 }
 
+function openAdminProductPhoto(productId){if(normalizeRole(currentUser?.role)!=='admin')return showToast('Hanya Admin yang dapat mengubah foto produk.','danger');const input=document.getElementById('admin-stock-photo-input');if(!input)return showToast('Form foto produk tidak tersedia.','danger');input.dataset.productId=productId;input.value='';input.click();}
+function compressImageForStorage(file,maxSize=1200,quality=.82){return new Promise((resolve,reject)=>{const rd=new FileReader();rd.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,maxSize/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality));};img.onerror=()=>reject(new Error('Foto tidak dapat diproses.'));img.src=rd.result;};rd.onerror=()=>reject(new Error('Foto gagal dibaca.'));rd.readAsDataURL(file);});}
+async function saveAdminProductPhoto(file,productId){if(!file||!productId)return;if(!file.type.startsWith('image/'))return showToast('File harus berupa gambar.','warning');if(file.size>3*1024*1024)return showToast('Ukuran foto maksimal 3 MB.','warning');try{const data=await compressImageForStorage(file);const p=(appState.products||[]).find(x=>x.id===productId);if(!p)throw new Error('Produk tidak ditemukan.');const payload={name:p.name,categoryId:p.categoryId,sku:p.sku,description:p.description||'',unit:p.unit||'Unit',warehouseLocation:p.warehouseLocation||'',minStock:Number(p.minStock||10),imageUrl:data,variants:p.variants||[]};await apiRequest(`/api/products/${encodeURIComponent(productId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});await syncFetchState(true);renderAdminStocks();renderAdminProducts();renderAdminDashboard();showToast('Foto produk berhasil diperbarui dan tersimpan di server.','success');}catch(e){showToast(e.message||'Gagal menyimpan foto produk.','danger');}}
+
 function renderAdminStocks() {
   const tbody = document.getElementById('tbody-stocks-list');
   if (!tbody) return;
@@ -1464,7 +1463,7 @@ function renderAdminStocks() {
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><img src="${p.imageUrl}" style="width:36px; height:36px; border-radius:6px; object-fit:cover;"></td>
+        <td><div class="stock-product-photo-cell"><img src="${p.imageUrl || ''}" onerror="this.style.display='none'" style="width:44px;height:44px;border-radius:10px;object-fit:cover;background:var(--bg-primary);"><button type="button" class="btn btn-secondary btn-xs" onclick="openAdminProductPhoto('${p.id}')" title="Ubah foto produk"><i class="fa-solid fa-camera"></i></button></div></td>
         <td><strong>${p.name}</strong><br><small class="text-primary">${v.name}</small></td>
         <td><code>${v.sku || p.sku}</code></td>
         <td><strong style="font-size:15px;">${inv.physicalStock}</strong> ${p.unit}</td>
@@ -2271,7 +2270,7 @@ function initModalActions() {
     const existing=(appState.products||[]).find(p=>p.id===id);
     const names=varStr ? varStr.split(',').map(x=>x.trim()).filter(Boolean) : ['Standard'];
     const variants=names.map((n,i)=>{const old=existing?.variants?.find(v=>v.name===n);return {id:old?.id,name:n,sku:old?.sku||`${sku}-${i+1}`};});
-    const payload={name,categoryId,sku,description,unit,warehouseLocation,minStock,variants};
+    const imageUrl=document.getElementById('prd-image-url')?.value?.trim() || existing?.imageUrl || ''; const payload={name,categoryId,sku,description,unit,warehouseLocation,minStock,imageUrl,variants};
     const original=btnSaveProduct.innerHTML; btnSaveProduct.disabled=true; btnSaveProduct.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
     try {
       await apiRequest(id?`/api/products/${encodeURIComponent(id)}`:'/api/products',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -2898,7 +2897,7 @@ function formatDateTime(isoStr) {
 // ========================================================================== 
 function editProduct(id){
   const p=(appState.products||[]).find(x=>x.id===id); if(!p) return;
-  document.getElementById('prd-id').value=p.id; document.getElementById('prd-name').value=p.name||''; document.getElementById('prd-sku').value=p.sku||''; document.getElementById('prd-unit').value=p.unit||'Unit'; document.getElementById('prd-location').value=p.warehouseLocation||''; document.getElementById('prd-min-stock').value=p.minStock||10; document.getElementById('prd-description').value=p.description||''; document.getElementById('prd-variants-input').value=(p.variants||[]).map(v=>v.name).join(', ');
+  document.getElementById('prd-id').value=p.id; if(document.getElementById('prd-image-url'))document.getElementById('prd-image-url').value=p.imageUrl||''; document.getElementById('prd-name').value=p.name||''; document.getElementById('prd-sku').value=p.sku||''; document.getElementById('prd-unit').value=p.unit||'Unit'; document.getElementById('prd-location').value=p.warehouseLocation||''; document.getElementById('prd-min-stock').value=p.minStock||10; document.getElementById('prd-description').value=p.description||''; document.getElementById('prd-variants-input').value=(p.variants||[]).map(v=>v.name).join(', ');
   const sel=document.getElementById('prd-category-id'); sel.innerHTML=(appState.categories||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); sel.value=p.categoryId||'';
   document.getElementById('modal-product-title').innerText='Edit Produk'; document.getElementById('modal-product').classList.add('active');
 }
