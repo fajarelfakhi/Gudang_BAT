@@ -85,7 +85,7 @@ const ALL_PERMISSIONS = [
 ];
 
 const VIEW_PERMISSIONS = {
-  'admin-dashboard':'dashboard.view','gudang-dashboard':'dashboard.view','seller-dashboard':'dashboard.view',
+  'admin-dashboard':'dashboard.view','admin-work-reports':'work.reports','gudang-dashboard':'dashboard.view','seller-dashboard':'dashboard.view',
   'admin-products':'products.manage','admin-stocks':'stocks.view','admin-stock-ins':'inventory.in_out','admin-stock-outs':'inventory.in_out',
   'admin-work-management':'wages.manage','admin-seller-bookings':'seller.booking','admin-sales-closing':'sales.closing','admin-damaged-goods':'inventory.qc','admin-returned-goods':'inventory.qc',
   'admin-wages':'wages.manage','admin-payouts':'wages.manage','admin-reports':'dashboard.view','admin-pending-users':'system.settings','admin-roles':'rbac.manage','admin-users':'system.settings','admin-activity-logs':'system.settings','admin-settings':'system.settings','admin-profile':'dashboard.view',
@@ -951,6 +951,7 @@ function switchView(viewId) {
     'admin-stock-ins': { title: 'Barang Masuk', sub: 'Pencatatan penerimaan pasokan barang dari supplier' },
     'admin-stock-outs': { title: 'Barang Keluar', sub: 'Pencatatan pengeluaran barang selain transaksi closing sales' },
     'admin-work-management': { title: 'Pekerjaan Gudang & Upah', sub: 'Atur jenis pekerjaan, tarif per unit, dan target harian worker' },
+    'admin-work-reports': { title: 'Laporan Pekerja Gudang', sub: 'Pantau pekerjaan setiap pekerja berdasarkan tanggal, jenis pekerjaan, produk, varian, jumlah, kondisi, dan upah' },
     'admin-seller-bookings': { title: 'Booking Stok Seller', sub: 'Verifikasi dan kelola reservasi stok oleh seller' },
     'admin-sales-closing': { title: 'Scan Resi & Closing Penjualan', sub: 'Closing resi pengiriman untuk mengubah stok menjadi Terjual' },
     'admin-damaged-goods': { title: 'Barang Cacat Gudang', sub: 'Monitoring dan tindak lanjut barang rusak / cacat QC' },
@@ -1006,6 +1007,7 @@ function refreshViewData(viewId) {
     case 'admin-stock-ins': renderAdminStockIns(); break;
     case 'admin-stock-outs': renderAdminStockOuts(); break;
     case 'admin-work-management': renderAdminWorkManagement(); renderAdminWorkTypesList(); break;
+    case 'admin-work-reports': renderAdminWorkerReports(); break;
     case 'admin-seller-bookings': renderAdminSellerBookings(); break;
     case 'admin-sales-closing': renderAdminSalesClosing(); break;
     case 'admin-damaged-goods': renderAdminDamagedGoods(); break;
@@ -1607,6 +1609,26 @@ function renderAdminWorkManagement() {
   });
 }
 
+function renderAdminWorkerReports(){
+  const tbody=document.getElementById('tbody-admin-worker-reports'); if(!tbody)return;
+  const worker=document.getElementById('admin-wr-worker')?.value||'';
+  const type=document.getElementById('admin-wr-type')?.value||'';
+  const product=document.getElementById('admin-wr-product')?.value||'';
+  const start=document.getElementById('admin-wr-start')?.value||'';
+  const end=document.getElementById('admin-wr-end')?.value||'';
+  const workers=[...new Map((appState.workReports||[]).map(r=>[r.workerId,{id:r.workerId,name:r.workerName||r.workerId}])).values()];
+  const fill=(id,items,label)=>{const el=document.getElementById(id);if(!el)return;const old=el.value;el.innerHTML=`<option value="">${label}</option>`+items.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');el.value=old;};
+  fill('admin-wr-worker',workers,'Semua pekerja'); fill('admin-wr-type',(appState.workTypes||[]),'Semua jenis pekerjaan'); fill('admin-wr-product',(appState.products||[]),'Semua produk');
+  let reports=[...(appState.workReports||[])];
+  if(worker)reports=reports.filter(r=>r.workerId===worker); if(type)reports=reports.filter(r=>r.workTypeId===type); if(product)reports=reports.filter(r=>r.productId===product);
+  if(start)reports=reports.filter(r=>(r.createdAt||r.date||'').slice(0,10)>=start); if(end)reports=reports.filter(r=>(r.createdAt||r.date||'').slice(0,10)<=end);
+  reports.sort((a,b)=>new Date(b.createdAt||b.date)-new Date(a.createdAt||a.date));
+  const qty=reports.reduce((s,r)=>s+Number(r.qty||0),0), wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0);
+  const c=document.getElementById('admin-wr-count'),q=document.getElementById('admin-wr-qty'),w=document.getElementById('admin-wr-wage');if(c)c.textContent=reports.length;if(q)q.textContent=`${qty.toLocaleString('id-ID')} Unit`;if(w)w.textContent=formatRupiah(wage);
+  tbody.innerHTML=reports.length?'':'<tr><td colspan="10" class="text-center">Tidak ada laporan pekerjaan sesuai filter.</td></tr>';
+  reports.forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${formatDateTime(r.createdAt||r.date)}</td><td><strong>${r.workerName||'-'}</strong></td><td>${r.workTypeName||'-'}</td><td>${r.productName||'-'}</td><td>${r.variantName||'-'}</td><td><strong>${Number(r.qty||0)} Unit</strong></td><td>${r.condition||'-'}</td><td>${formatRupiah(r.ratePerUnit||0)}</td><td><strong>${formatRupiah(r.totalWage||0)}</strong></td><td>${r.note||'-'}</td>`;tbody.appendChild(tr);});
+}
+
 function renderAdminWages() {
   const tbody = document.getElementById('tbody-admin-wages-summary');
   if (!tbody) return;
@@ -2031,7 +2053,7 @@ function renderAdminActivityLogs() {
 // ==========================================================================
 // 11. WORKER GUDANG & SELLER VIEWS
 // ==========================================================================
-function renderGudangDashboard(){if(!currentUser)return;const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range));const targetQty=targets.reduce((s,t)=>s+Number(t.targetQty||0),0),doneQty=reports.reduce((s,r)=>s+Number(r.qty||0),0),wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0),unpaid=getWorkerAvailableWage(currentUser.id);const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerText=v;};set('gudang-stat-today-target',`${targetQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-done',`${doneQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-wage',formatRupiah(wage));set('gudang-stat-unpaid',formatRupiah(unpaid));set('gudang-period-label',range.label);const tbody=document.getElementById('tbody-gudang-today-targets');if(!tbody)return;tbody.innerHTML='';if(!targets.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center">Belum ada target pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}targets.forEach(t=>{const wt=(appState.workTypes||[]).find(x=>x.id===t.workTypeId),p=(appState.products||[]).find(x=>x.id===t.productId),v=(p?.variants||[]).find(x=>x.id===t.variantId),done=reports.filter(r=>r.workTypeId===t.workTypeId&&r.productId===t.productId&&r.variantId===t.variantId&&(r.createdAt||'').slice(0,10)===t.date).reduce((s,r)=>s+Number(r.qty||0),0),pct=t.targetQty?Math.min(100,Math.round(done/t.targetQty*100)):0,tr=document.createElement('tr');tr.innerHTML=`<td>${t.date}<br><strong>${wt?.name||'-'}</strong></td><td>${p?.name||'-'} (${v?.name||'-'})</td><td>${Number(t.targetQty||0)} Unit</td><td><strong class="text-success">${done} Unit</strong></td><td><div class="progress-label">${pct}%</div><div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div></td><td class="text-right"><button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}','${t.productId}','${t.variantId}')">Lapor Kerja</button></td>`;tbody.appendChild(tr);});}
+function renderGudangDashboard(){if(!currentUser)return;const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range));const targetQty=targets.reduce((s,t)=>s+Number(t.targetQty||0),0),doneQty=reports.reduce((s,r)=>s+Number(r.qty||0),0),wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0),unpaid=getWorkerAvailableWage(currentUser.id);const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerText=v;};set('gudang-stat-today-target',`${targetQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-done',`${doneQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-wage',formatRupiah(wage));set('gudang-stat-unpaid',formatRupiah(unpaid));set('gudang-period-label',range.label);set('gudang-dashboard-report-period',range.label);const reportBody=document.getElementById('tbody-gudang-dashboard-reports');if(reportBody){reportBody.innerHTML=reports.length?'':'<tr><td colspan="6" class="text-center">Belum ada laporan pekerjaan pada periode ini.</td></tr>';reports.slice(0,50).forEach(r=>{reportBody.innerHTML+=`<tr><td>${formatDateTime(r.createdAt||r.date)}</td><td><strong>${r.workTypeName||'-'}</strong></td><td>${r.productName||'-'} (${r.variantName||'-'})</td><td>${Number(r.qty||0)} Unit</td><td>${r.condition||'-'}</td><td><strong>${formatRupiah(r.totalWage||0)}</strong></td></tr>`;});}const tbody=document.getElementById('tbody-gudang-today-targets');if(!tbody)return;tbody.innerHTML='';if(!targets.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center">Belum ada target pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}targets.forEach(t=>{const wt=(appState.workTypes||[]).find(x=>x.id===t.workTypeId),p=(appState.products||[]).find(x=>x.id===t.productId),v=(p?.variants||[]).find(x=>x.id===t.variantId),done=reports.filter(r=>r.workTypeId===t.workTypeId&&r.productId===t.productId&&r.variantId===t.variantId&&(r.createdAt||'').slice(0,10)===t.date).reduce((s,r)=>s+Number(r.qty||0),0),pct=t.targetQty?Math.min(100,Math.round(done/t.targetQty*100)):0,tr=document.createElement('tr');tr.innerHTML=`<td>${t.date}<br><strong>${wt?.name||'-'}</strong></td><td>${p?.name||'-'} (${v?.name||'-'})</td><td>${Number(t.targetQty||0)} Unit</td><td><strong class="text-success">${done} Unit</strong></td><td><div class="progress-label">${pct}%</div><div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div></td><td class="text-right"><button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}','${t.productId}','${t.variantId}')">Lapor Kerja</button></td>`;tbody.appendChild(tr);});}
 function openGudangSummary(type){const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range)),body=document.getElementById('gudang-summary-body'),title=document.getElementById('gudang-summary-title');if(!body)return;const totalTarget=targets.reduce((s,x)=>s+Number(x.targetQty||0),0),totalDone=reports.reduce((s,x)=>s+Number(x.qty||0),0),totalWage=reports.reduce((s,x)=>s+Number(x.totalWage||0),0);if(title)title.textContent={target:'Ringkasan Target Pekerjaan',done:'Ringkasan Pekerjaan Selesai',wage:'Ringkasan Pendapatan',unpaid:'Upah Belum Dicairkan'}[type]||'Ringkasan Dashboard';if(type==='unpaid'){body.innerHTML=`<div class="summary-highlight"><span>Saldo yang masih tersedia untuk dicairkan</span><strong>${formatRupiah(getWorkerAvailableWage(currentUser.id))}</strong></div><p class="text-muted" style="margin-top:12px">Saldo ini adalah akumulasi seluruh upah yang sudah diperoleh, dikurangi pengajuan yang masih diproses/disetujui dan pencairan yang sudah dibayar.</p><div class="report-actions"><button class="btn btn-primary" onclick="closeGudangSummary();switchView('gudang-payout-request')">Ajukan Pencairan</button></div>`;}else{body.innerHTML=`<div class="variant-report-grid"><div><small>Total Target</small><strong>${totalTarget.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Selesai</small><strong>${totalDone.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Upah</small><strong>${formatRupiah(totalWage)}</strong></div></div><div class="summary-list">${reports.slice(0,20).map(r=>`<div><span>${r.workTypeName||'-'} — ${r.productName||'-'} (${r.variantName||'-'})</span><strong>${Number(r.qty||0)} Unit • ${formatRupiah(r.totalWage||0)}</strong></div>`).join('')||'<p class="text-muted">Belum ada laporan pada periode ini.</p>'}</div>`;}document.getElementById('modal-gudang-summary')?.classList.add('active');}
 function closeGudangSummary(){document.getElementById('modal-gudang-summary')?.classList.remove('active');}
 
@@ -2040,7 +2062,7 @@ function renderGudangTargets() {
   if (!tbody) return;
   tbody.innerHTML = '';
 
-  const targets = (appState.workTargets || []).filter(t => !currentUser || t.assignedToUserId === currentUser.id);
+  const range=getGudangRange(); const targets=(appState.workTargets||[]).filter(t=>(!currentUser||t.assignedToUserId===currentUser.id)&&inDateRange(`${t.date}T12:00:00`,range));
   if (targets.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" class="text-center">Belum ada target pekerjaan.</td></tr>`;
     return;
@@ -2066,46 +2088,27 @@ function renderGudangTargets() {
 
 function renderGudangWorkHistory() {
   const tbody = document.getElementById('tbody-gudang-history');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  if (!currentUser) return;
-  const reports = (appState.workReports || []).filter(r => r.workerId === currentUser.id);
-  if (reports.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center">Anda belum memasukkan laporan pekerjaan.</td></tr>`;
-    return;
-  }
-
-  reports.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${formatDateTime(r.createdAt)}</td>
-      <td><strong>${r.workTypeName}</strong></td>
-      <td>${r.productName} (${r.variantName})</td>
-      <td>${r.qty} Unit</td>
-      <td><span class="badge badge-success">${r.condition}</span></td>
-      <td>Rp ${(r.ratePerUnit || 0).toLocaleString('id-ID')}</td>
-      <td><strong class="text-success">Rp ${(r.totalWage || 0).toLocaleString('id-ID')}</strong></td>
-    `;
-    tbody.appendChild(tr);
-  });
+  if (!tbody || !currentUser) return;
+  const range=getGudangRange();
+  const reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range));
+  const label=document.getElementById('gudang-history-period-label'); if(label) label.textContent=range.label;
+  tbody.innerHTML='';
+  if(!reports.length){tbody.innerHTML=`<tr><td colspan="7" class="text-center">Belum ada laporan pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}
+  reports.forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${formatDateTime(r.createdAt)}</td><td><strong>${r.workTypeName}</strong></td><td>${r.productName} (${r.variantName})</td><td>${r.qty} Unit</td><td><span class="badge badge-success">${r.condition}</span></td><td>Rp ${(r.ratePerUnit||0).toLocaleString('id-ID')}</td><td><strong class="text-success">Rp ${(r.totalWage||0).toLocaleString('id-ID')}</strong></td>`;tbody.appendChild(tr);});
 }
 
 function renderGudangEarnings() {
-  if (!currentUser) return;
-  const reports = (appState.workReports || []).filter(r => r.workerId === currentUser.id);
-  const now = new Date();
-  const todayKey = now.toISOString().slice(0,10);
-  const dayReports = reports.filter(r => (r.createdAt || '').slice(0,10) === todayKey);
-  const weekStart = new Date(now); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
-  const month = now.getMonth(), year = now.getFullYear();
-  const sum = arr => arr.reduce((a,r)=>a+Number(r.totalWage||0),0);
-  const today = sum(dayReports);
-  const week = sum(reports.filter(r => new Date(r.createdAt) >= weekStart));
-  const monthTotal = sum(reports.filter(r => { const d=new Date(r.createdAt); return d.getMonth()===month && d.getFullYear()===year; }));
-  const unpaid = getWorkerAvailableWage(currentUser.id);
-  const set = (id,val) => { const el=document.getElementById(id); if(el) el.innerText=formatRupiah(val); };
-  set('earn-today',today); set('earn-week',week); set('earn-month',monthTotal); set('earn-unpaid',unpaid);
+  if(!currentUser)return;
+  const range=getGudangRange();
+  const all=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id);
+  const reports=all.filter(r=>inDateRange(r.createdAt||r.date,range));
+  const sum=arr=>arr.reduce((a,r)=>a+Number(r.totalWage||0),0);
+  const total=sum(reports), units=reports.reduce((a,r)=>a+Number(r.qty||0),0), unpaid=getWorkerAvailableWage(currentUser.id);
+  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.innerText=formatRupiah(val);};
+  // Tetap pertahankan kartu lama, tetapi nilainya mengikuti filter dashboard aktif.
+  set('earn-today',total); set('earn-week',total); set('earn-month',total); set('earn-unpaid',unpaid);
+  const lbl=document.getElementById('gudang-earnings-period-label');if(lbl)lbl.textContent=range.label;
+  const meta=document.getElementById('gudang-earnings-filter-summary');if(meta)meta.innerHTML=`<strong>${range.label}</strong> • ${reports.length} laporan • ${units.toLocaleString('id-ID')} unit • ${formatRupiah(total)}`;
 }
 
 function renderGudangPayoutRequest() {
@@ -2973,3 +2976,7 @@ document.addEventListener('change', (e) => {
     const r=new FileReader(); r.onload=()=>{ const input=document.getElementById('setting-company-logo'); if(input){input.value=r.result; renderCompanyLogo();} }; r.readAsDataURL(file);
   }
 });
+
+// Tahap 13: filter laporan admin langsung tanpa mengubah database
+document.addEventListener('change',(e)=>{if(e.target?.matches('#admin-wr-worker,#admin-wr-type,#admin-wr-product,#admin-wr-start,#admin-wr-end'))renderAdminWorkerReports();});
+document.addEventListener('click',(e)=>{if(e.target?.closest('#btn-admin-wr-reset')){['admin-wr-worker','admin-wr-type','admin-wr-product','admin-wr-start','admin-wr-end'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});renderAdminWorkerReports();}});
