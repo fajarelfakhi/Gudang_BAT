@@ -247,6 +247,10 @@
                     <i class="fa-solid fa-list-check"></i>
                     <span>Pekerjaan Gudang</span>
                 </button>
+                <button class="nav-link" data-view="admin-work-reports">
+                    <i class="fa-solid fa-clipboard-list"></i>
+                    <span>Laporan Pekerja Gudang</span>
+                </button>
                 <button class="nav-link" data-view="admin-seller-bookings">
                     <i class="fa-solid fa-bookmark"></i>
                     <span>Booking Seller</span>
@@ -643,6 +647,28 @@
                             </table>
                         </div>
                     </div>
+                </section>
+
+
+                <!-- VIEW ADMIN LAPORAN PEKERJA GUDANG -->
+                <section id="view-admin-work-reports" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding:18px;margin-bottom:18px;">
+                        <div class="table-toolbar"><div><h3 style="font-size:16px;font-weight:800;">Laporan Pekerja Gudang</h3><small class="text-muted">Filter dan pantau seluruh pekerjaan yang dilaporkan pekerja.</small></div></div>
+                        <div class="filter-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:14px;">
+                            <select id="admin-wr-worker" class="form-control"><option value="">Semua pekerja</option></select>
+                            <select id="admin-wr-type" class="form-control"><option value="">Semua jenis pekerjaan</option></select>
+                            <select id="admin-wr-product" class="form-control"><option value="">Semua produk</option></select>
+                            <input id="admin-wr-start" type="date" class="form-control" title="Tanggal mulai">
+                            <input id="admin-wr-end" type="date" class="form-control" title="Tanggal akhir">
+                            <button id="btn-admin-wr-reset" class="btn btn-secondary" type="button"><i class="fa-solid fa-rotate-left"></i> Reset Filter</button>
+                        </div>
+                    </div>
+                    <div class="stats-grid" style="margin-bottom:18px;">
+                        <div class="stat-card"><div class="stat-info"><span>Total Laporan</span><h3 id="admin-wr-count">0</h3></div></div>
+                        <div class="stat-card"><div class="stat-info"><span>Total Unit Dikerjakan</span><h3 id="admin-wr-qty">0 Unit</h3></div></div>
+                        <div class="stat-card"><div class="stat-info"><span>Total Upah</span><h3 id="admin-wr-wage">Rp 0</h3></div></div>
+                    </div>
+                    <div class="card-table-wrapper"><div class="table-responsive"><table class="data-table"><thead><tr><th>Waktu</th><th>Pekerja</th><th>Jenis</th><th>Produk</th><th>Varian</th><th>Jumlah</th><th>Kondisi</th><th>Tarif/Unit</th><th>Total Upah</th><th>Catatan</th></tr></thead><tbody id="tbody-admin-worker-reports"></tbody></table></div></div>
                 </section>
 
                 <!-- VIEW ADMIN BOOKING SELLER -->
@@ -1142,6 +1168,10 @@
                             </table>
                         </div>
                     </div>
+                    <div class="card-table-wrapper" style="margin-top:20px;">
+                        <div class="table-toolbar"><h3 style="font-size:15px;font-weight:700;">Laporan Pekerjaan — <span id="gudang-dashboard-report-period">Hari Ini</span></h3><button class="btn btn-secondary btn-sm" type="button" onclick="switchView('gudang-work-history')">Lihat Riwayat</button></div>
+                        <div class="table-responsive"><table class="data-table"><thead><tr><th>Waktu</th><th>Jenis</th><th>Produk & Varian</th><th>Jumlah</th><th>Kondisi</th><th>Upah</th></tr></thead><tbody id="tbody-gudang-dashboard-reports"></tbody></table></div>
+                    </div>
                     <div class="modal-backdrop" id="modal-gudang-summary"><div class="modal-card modal-card-wide"><div class="modal-header"><h3 id="gudang-summary-title">Ringkasan Dashboard</h3><button class="btn-icon" onclick="closeGudangSummary()"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body" id="gudang-summary-body"></div></div></div>
                 </section>
 
@@ -1256,6 +1286,7 @@
                 <!-- VIEW GUDANG EARNINGS & PAYOUT -->
                 <section id="view-gudang-earnings" class="app-view hidden">
                     <div class="stats-grid">
+                        <div id="gudang-earnings-filter-summary" class="soft-filter-summary" style="grid-column:1/-1;padding:12px 14px;border-radius:12px;background:var(--bg-secondary);">Periode aktif</div>
                         <div class="stat-card">
                             <div class="stat-icon icon-green"><i class="fa-solid fa-calendar-day"></i></div>
                             <div class="stat-details">
