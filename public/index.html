@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body class="light-theme">
 
@@ -241,6 +241,10 @@
                     <i class="fa-solid fa-truck-arrow-right"></i>
                     <span>Barang Keluar</span>
                 </button>
+                <button class="nav-link" data-view="admin-transfers">
+                    <i class="fa-solid fa-right-left"></i>
+                    <span>Transfer Antar Gudang</span>
+                </button>
 
                 <div class="nav-group-label">OPERASIONAL & PENJUALAN</div>
                 <button class="nav-link" data-view="admin-work-management">
@@ -401,6 +405,7 @@
                         <i class="fa-solid fa-bars"></i>
                     </button>
                     <div class="page-title-box">
+                        <div class="active-location-wrap"><span>Gudang aktif</span><select id="active-location-selector" class="active-location-selector"><option value="GUD-01">🏢 Gudang Utama</option></select></div>
                         <h2 id="page-title-text">Dashboard Admin</h2>
                         <p id="page-subtitle-text">Ringkasan real-time aktivitas dan operasional gudang</p>
                     </div>
@@ -712,7 +717,7 @@
                             <select id="closing-booking-id" class="form-control">
                                 <option value="">-- Pilih booking aktif yang akan di-closing --</option>
                             </select>
-                            <small style="color: var(--text-muted);">Pilih booking aktif agar resi ditutup ke produk, varian, jumlah, dan seller yang benar.</small>
+                            <small style="color: var(--text-muted);">Pilih booking aktif. Setelah resi dipindai, sistem otomatis mencatat nama toko, barang, varian, jumlah, dan transaksi closing.</small>
                             <div>
                                 <button class="btn btn-primary" id="btn-process-closing-scan">
                                     <i class="fa-solid fa-qrcode"></i> Proses Closing
@@ -1031,6 +1036,17 @@
                     </div>
                 </section>
 
+                <!-- VIEW ADMIN TRANSFER ANTAR GUDANG -->
+                <section id="view-admin-transfers" class="app-view hidden">
+                    <div class="card-table-wrapper" style="padding:20px;">
+                        <div class="section-header" style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+                            <div><h3>Transfer Antar Gudang</h3><p class="text-muted">Pindahkan stok antar lokasi dengan alur Diajukan → Dikirim → Diterima.</p></div>
+                            <button class="btn btn-primary" id="btn-open-transfer"><i class="fa-solid fa-plus"></i> Transfer Baru</button>
+                        </div>
+                        <div class="table-responsive"><table class="data-table"><thead><tr><th>No. Transfer</th><th>Dari</th><th>Ke</th><th>Produk / Varian</th><th>Qty</th><th>Status</th><th>Tanggal</th><th>Aksi</th></tr></thead><tbody id="tbody-admin-transfers"></tbody></table></div>
+                    </div>
+                </section>
+
                 <!-- VIEW ADMIN PENGATURAN -->
                 <section id="view-admin-settings" class="app-view hidden">
                     <div class="card-table-wrapper" style="padding: 24px; max-width: 750px;">
@@ -1066,6 +1082,12 @@
                             <button type="submit" class="btn btn-primary">
                                 <i class="fa-solid fa-floppy-disk"></i> Simpan Pengaturan
                             </button>
+                            <div class="location-management-panel">
+                                <div><h4><i class="fa-solid fa-warehouse"></i> Multi-Gudang</h4><p class="text-muted">Tambahkan lokasi baru. Satu akun PJ/Admin dapat berpindah gudang tanpa logout.</p></div>
+                                <div class="location-form-grid"><input id="new-location-code" class="form-control" placeholder="Kode (GUD-02)"><input id="new-location-name" class="form-control" placeholder="Nama Gudang"><input id="new-location-address" class="form-control" placeholder="Alamat"><input id="new-location-manager" class="form-control" placeholder="PJ Gudang"></div>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-add-location"><i class="fa-solid fa-plus"></i> Tambah Gudang</button>
+                                <div id="location-list" class="location-list"></div>
+                            </div>
                             <div class="integrity-audit-panel">
                                 <div><h4><i class="fa-solid fa-shield-halved"></i> Pemeriksaan Integritas Data</h4><p class="text-muted">Periksa apakah stok, booking, resi closing, dan data transaksi memiliki indikasi inkonsistensi. Pemeriksaan ini tidak mengubah data.</p></div>
                                 <button type="button" class="btn btn-secondary btn-sm" id="btn-integrity-audit"><i class="fa-solid fa-magnifying-glass-chart"></i> Jalankan Audit</button>
@@ -1567,6 +1589,7 @@
   <form class="profile-form" data-profile-form>
     <div class="form-grid-2"><div class="form-group"><label class="form-label">Nama Lengkap</label><input class="form-control" data-profile-field="name" required></div><div class="form-group"><label class="form-label">Username</label><input class="form-control" data-profile-field="username" required></div></div>
     <div class="form-grid-2"><div class="form-group"><label class="form-label">Email</label><input type="email" class="form-control" data-profile-field="email"></div><div class="form-group"><label class="form-label">No. Telepon</label><input class="form-control" data-profile-field="phone"></div></div>
+    <div class="form-group"><label class="form-label">Nama Toko</label><input class="form-control" data-profile-field="storeName" placeholder="Nama toko yang akan tampil pada data pengiriman"></div>
     <div class="profile-actions"><span class="text-muted">Foto dan informasi akan tersimpan ke akun online.</span><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> Simpan Perubahan</button></div>
   </form>
 </div></section>
@@ -1944,6 +1967,7 @@
                         <input type="text" id="usr-phone" class="form-control" placeholder="0812...">
                     </div>
                     <div class="form-group"><label class="form-label">Status Akun</label><select id="usr-status" class="form-control"><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></div>
+                    <div class="form-group"><label class="form-label">Akses Lokasi Gudang</label><small class="text-muted" style="display:block;margin-bottom:8px;">Tentukan gudang yang boleh digunakan akun ini. Admin tetap dapat mengakses semua gudang.</small><div id="usr-locations" class="permissions-grid"></div></div>
                     <div class="form-group"><label class="form-label">Hak Akses Individu</label><small class="text-muted" style="display:block;margin-bottom:8px;">Centang akses khusus untuk akun ini. Hak akses ini dapat berbeda dari role.</small><div id="usr-permissions" class="permissions-grid"></div></div>
                 </form>
             </div>
@@ -1976,7 +2000,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary modal-close">Batal</button>
-                <button class="btn btn-primary" id="btn-submit-scanned-barcode">Gunakan Resi Ini</button>
+                <button class="btn btn-primary" id="btn-submit-scanned-barcode">Gunakan & Proses Resi</button>
             </div>
         </div>
     </div>
@@ -2043,6 +2067,6 @@
     <!-- TOAST NOTIFICATION CONTAINER -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=14"></script>
 </body>
 </html>
