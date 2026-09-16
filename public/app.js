@@ -41,6 +41,12 @@ let currentChartProductivity = null;
 let activePeriodFilter = 'today';
 let gudangPeriodFilter = 'today';
 let gudangCustomRange = { start: '', end: '' };
+let activeLocationId = localStorage.getItem('gudangbat_active_location') || 'GUD-01';
+let availableLocations = [];
+function getVisibleInventory(){ const all=appState.inventory||[]; if(activeLocationId==='ALL') return all; return all.filter(i=>(i.locationId||'GUD-01')===activeLocationId); }
+function locationName(id){ return (availableLocations.find(x=>x.id===id)||appState.locations?.find(x=>x.id===id))?.name || id || 'Gudang Utama'; }
+function getActiveLocation(){ return activeLocationId==='ALL' ? {id:'ALL',name:'Semua Gudang'} : (availableLocations.find(x=>x.id===activeLocationId)||{id:activeLocationId,name:locationName(activeLocationId)}); }
+
 function localDateKey(d=new Date()){ const x=new Date(d); const y=x.getFullYear(); const m=String(x.getMonth()+1).padStart(2,'0'); const day=String(x.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 function getGudangRange(){
   const now=new Date(); const today=localDateKey(now);
@@ -59,7 +65,7 @@ let stateVersion = Number(localStorage.getItem('gudangbat_state_version') || 0);
 
 function getAuthHeaders(extra = {}) {
   const token = localStorage.getItem('gudangbat_token');
-  return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}), 'X-Location-ID': activeLocationId || 'GUD-01' };
 }
 
 async function apiRequest(url, options = {}) {
@@ -86,7 +92,7 @@ const ALL_PERMISSIONS = [
 
 const VIEW_PERMISSIONS = {
   'admin-dashboard':'dashboard.view','admin-work-reports':'work.reports','gudang-dashboard':'dashboard.view','seller-dashboard':'dashboard.view',
-  'admin-products':'products.manage','admin-stocks':'stocks.view','admin-stock-ins':'inventory.in_out','admin-stock-outs':'inventory.in_out',
+  'admin-products':'products.manage','admin-stocks':'stocks.view','admin-stock-ins':'inventory.in_out','admin-stock-outs':'inventory.in_out','admin-transfers':'inventory.in_out',
   'admin-work-management':'wages.manage','admin-seller-bookings':'seller.booking','admin-sales-closing':'sales.closing','admin-damaged-goods':'inventory.qc','admin-returned-goods':'inventory.qc',
   'admin-wages':'wages.manage','admin-payouts':'wages.manage','admin-reports':'dashboard.view','admin-pending-users':'system.settings','admin-roles':'rbac.manage','admin-users':'system.settings','admin-activity-logs':'system.settings','admin-settings':'system.settings','admin-profile':'dashboard.view',
   'gudang-targets':'dashboard.view','gudang-work-report':'work.reports','gudang-work-history':'work.reports','gudang-earnings':'wages.manage','gudang-payout-request':'wages.manage','gudang-profile':'dashboard.view',
@@ -113,7 +119,7 @@ function ensureStateShape() {
     users: [], categories: [], products: [], inventory: [], stockMutations: [], stockIns: [], stockOuts: [],
     workTypes: [], workRates: [], workTargets: [], workReports: [], payoutRequests: [], sellerBookings: [],
     shippingResi: [], scannedResi: [], userProfiles: {}, salesClosings: [], damagedGoods: [], returnedGoods: [], activityLogs: [],
-    pendingRegistrations: [], customRoles: [],
+    pendingRegistrations: [], customRoles: [], locations: [{id:'GUD-01',name:'Gudang Utama',status:'active',isDefault:true}], userLocations: {},
     rbac: {
       rolePermissions: {
         admin: ALL_PERMISSIONS.map(p => p.id),
@@ -197,8 +203,10 @@ async function loadPublicBranding() {
       const appName=document.getElementById('login-simple-app-name'); if(appName) appName.textContent=json.data.appName||'GUDANG BAT';
       const sub=document.getElementById('login-simple-subtitle'); if(sub) sub.textContent=json.data.warehouseName||'Masuk ke sistem manajemen gudang';
       renderCompanyLogo();
+        loadLocations().catch(()=>{});
     }
-  } catch { renderCompanyLogo(); }
+  } catch { renderCompanyLogo();
+        loadLocations().catch(()=>{}); }
 }
 
 function renderCompanyLogo() {
@@ -298,6 +306,7 @@ async function loadAppState() {
         isStateInitialized = true;
         ensureStateShape();
         renderCompanyLogo();
+        loadLocations().catch(()=>{});
         return;
       }
     }
@@ -319,6 +328,7 @@ async function syncFetchState(silent = false) {
         isStateInitialized = true;
         ensureStateShape();
         renderCompanyLogo();
+        loadLocations().catch(()=>{});
         if (!silent) showToast("Data berhasil disinkronisasi dengan server.", "success");
         refreshCurrentView();
       }
@@ -525,6 +535,10 @@ function resetLoginBtn(submitBtn, originalHtml) {
   }
 }
 
+async function loadLocations(){ try{const r=await apiRequest(`${API_BASE}/locations`); availableLocations=r.data||[]; appState.locations=appState.locations||availableLocations; if(currentUser?.role==='admin'){ if(!availableLocations.some(x=>x.id===activeLocationId)&&activeLocationId!=='ALL')activeLocationId='ALL'; } else if(!availableLocations.some(x=>x.id===activeLocationId)){activeLocationId=availableLocations[0]?.id||'GUD-01';} localStorage.setItem('gudangbat_active_location',activeLocationId); renderLocationSelector(); }catch(e){availableLocations=appState.locations||[];renderLocationSelector();} }
+function renderLocationSelector(){const sel=document.getElementById('active-location-selector'); if(!sel)return; const isAdmin=normalizeRole(currentUser?.role)==='admin'; const opts=(isAdmin?[{id:'ALL',name:'Semua Gudang'}]:[]).concat(availableLocations).filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i); sel.innerHTML=opts.map(x=>`<option value="${x.id}">${x.id==='ALL'?'🌐 ': '🏢 '}${x.name}</option>`).join(''); sel.value=opts.some(x=>x.id===activeLocationId)?activeLocationId:(isAdmin?'ALL':opts[0]?.id||'GUD-01'); activeLocationId=sel.value; const badge=document.getElementById('active-location-label'); if(badge)badge.textContent=getActiveLocation().name; }
+async function changeActiveLocation(id){activeLocationId=id||'GUD-01';localStorage.setItem('gudangbat_active_location',activeLocationId);renderLocationSelector();await syncFetchState(true);refreshCurrentView();showToast(`Gudang aktif: ${getActiveLocation().name}`,'success');}
+
 async function loginSuccess(user, token = null) {
   currentUser = user || null;
   if (token) localStorage.setItem('gudangbat_token', token);
@@ -534,6 +548,7 @@ async function loginSuccess(user, token = null) {
   
   // Wajib muat state dari server terlebih dahulu sebelum menampilkan UI!
   await syncFetchState(true);
+  await loadLocations().catch(()=>{});
 
   const loginScreen = document.getElementById('login-screen');
   const appLayout = document.getElementById('app-layout');
@@ -570,6 +585,7 @@ async function loginSuccess(user, token = null) {
   await loadMyProfile();
   setProfilePhotoUI(getProfileRecord().avatarData || '');
   renderCompanyLogo();
+        loadLocations().catch(()=>{});
   updateNotificationBadges();
   showToast(`Login berhasil. Selamat datang, ${user.name}!`, "success");
 }
@@ -869,6 +885,7 @@ function initEventListeners() {
       appState.settings.bookingExpiryDays = Number(document.getElementById('setting-booking-expiry')?.value || 3);
       appState.settings.minStockDefault = Number(document.getElementById('setting-min-stock')?.value || 10);
       renderCompanyLogo();
+        loadLocations().catch(()=>{});
       const saved = await persistAppState('UPDATE_SETTINGS', 'Admin memperbarui pengaturan aplikasi dan logo perusahaan.');
       if (saved !== false) showToast('Pengaturan aplikasi & logo perusahaan berhasil disimpan!', 'success');
     });
@@ -931,6 +948,13 @@ function initEventListeners() {
   document.getElementById('btn-gudang-apply-date')?.addEventListener('click',()=>{gudangCustomRange.start=document.getElementById('gudang-filter-start')?.value||'';gudangCustomRange.end=document.getElementById('gudang-filter-end')?.value||'';if(!gudangCustomRange.start||!gudangCustomRange.end)return showToast('Pilih tanggal mulai dan tanggal akhir.','warning');renderGudangDashboard();});
   document.querySelectorAll('[data-gudang-summary]').forEach(el=>el.addEventListener('click',()=>openGudangSummary(el.dataset.gudangSummary)));
   document.getElementById('seller-refresh-data')?.addEventListener('click',()=>syncFetchState());
+  document.getElementById('active-location-selector')?.addEventListener('change',e=>changeActiveLocation(e.target.value));
+  document.getElementById('btn-open-transfer')?.addEventListener('click',openTransferModal);
+  document.getElementById('form-transfer')?.addEventListener('submit',createTransfer);
+  document.getElementById('transfer-product')?.addEventListener('change',populateTransferVariants);
+  document.getElementById('transfer-from')?.addEventListener('change',updateTransferStockInfo);
+  document.getElementById('transfer-variant')?.addEventListener('change',updateTransferStockInfo);
+  document.getElementById('btn-add-location')?.addEventListener('click',async()=>{const name=document.getElementById('new-location-name')?.value.trim(),code=document.getElementById('new-location-code')?.value.trim().toUpperCase(),address=document.getElementById('new-location-address')?.value.trim(),manager=document.getElementById('new-location-manager')?.value.trim();if(!name||!code)return showToast('Kode dan nama gudang wajib diisi.','warning');try{const r=await apiRequest(`${API_BASE}/locations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,address,manager})});document.getElementById('new-location-name').value='';document.getElementById('new-location-code').value='';document.getElementById('new-location-address').value='';document.getElementById('new-location-manager').value='';await syncFetchState(true);await loadLocations();renderLocationManagement();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}});
   document.getElementById('seller-dashboard-search')?.addEventListener('input',()=>renderSellerStockView());
   initModalActions();
 }
@@ -1006,6 +1030,7 @@ function refreshViewData(viewId) {
     case 'admin-stocks': renderAdminStocks(); break;
     case 'admin-stock-ins': renderAdminStockIns(); break;
     case 'admin-stock-outs': renderAdminStockOuts(); break;
+    case 'admin-transfers': renderAdminTransfers(); break;
     case 'admin-work-management': renderAdminWorkManagement(); renderAdminWorkTypesList(); break;
     case 'admin-work-reports': renderAdminWorkerReports(); break;
     case 'admin-seller-bookings': renderAdminSellerBookings(); break;
@@ -1017,7 +1042,8 @@ function refreshViewData(viewId) {
     case 'admin-reports': renderAdminReports(); break;
     case 'admin-pending-users': loadPendingUsersData(); break;
     case 'admin-roles': renderRbacMatrix(); break;
-    case 'admin-settings': renderCompanyLogo(); break;
+    case 'admin-settings': renderCompanyLogo();
+        loadLocations().catch(()=>{}); break;
     case 'admin-users': renderAdminUsers(); break;
     case 'admin-activity-logs': renderAdminActivityLogs(); break;
     case 'admin-profile': renderProfileView(); break;
@@ -1256,7 +1282,7 @@ function updateBadges() {
 // 4. ADMIN DASHBOARD & CHARTS
 // ==========================================================================
 function renderAdminDashboard() {
-  const inv = appState.inventory || [];
+  const inv = getVisibleInventory();
   
   let totalProducts = (appState.products || []).length;
   let totalPhysical = inv.reduce((acc, i) => acc + (i.physicalStock || 0), 0);
@@ -1447,7 +1473,7 @@ function renderAdminStocks() {
   tbody.innerHTML = '';
 
   const products = appState.products || [];
-  const inventory = appState.inventory || [];
+  const inventory = getVisibleInventory();
 
   if (products.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" class="text-center">Belum ada stok produk terdaftar.</td></tr>`;
@@ -1609,6 +1635,25 @@ function renderAdminWorkManagement() {
   });
 }
 
+
+function closeTransferModal(){ document.getElementById('modal-transfer')?.classList.remove('active'); }
+function openTransferModal(){
+  const modal=document.getElementById('modal-transfer'); if(!modal)return;
+  const locs=appState.locations||availableLocations||[];
+  const fill=(id,arr,placeholder)=>{const el=document.getElementById(id); if(!el)return; el.innerHTML=placeholder+arr.filter(x=>x.status!=='inactive').map(x=>`<option value="${x.id}">${x.name}</option>`).join('');};
+  fill('transfer-from',locs,'<option value="">Pilih gudang asal</option>'); fill('transfer-to',locs,'<option value="">Pilih gudang tujuan</option>');
+  const from=document.getElementById('transfer-from'); if(activeLocationId&&activeLocationId!=='ALL'&&locs.some(x=>x.id===activeLocationId))from.value=activeLocationId;
+  populateTransferProducts(); modal.classList.add('active'); updateTransferStockInfo();
+}
+function populateTransferProducts(){ const el=document.getElementById('transfer-product'); if(!el)return; const products=appState.products||[]; const old=el.value; el.innerHTML='<option value="">Pilih produk</option>'+products.map(p=>`<option value="${p.id}">${p.name} — ${p.sku||'-'}</option>`).join(''); if(products.some(p=>p.id===old))el.value=old; populateTransferVariants(); }
+function populateTransferVariants(){ const p=(appState.products||[]).find(x=>x.id===document.getElementById('transfer-product')?.value),el=document.getElementById('transfer-variant'); if(!el)return; el.innerHTML='<option value="">Pilih varian</option>'+(p?.variants||[]).map(v=>`<option value="${v.id}">${v.name}</option>`).join(''); updateTransferStockInfo(); }
+function updateTransferStockInfo(){ const box=document.getElementById('transfer-stock-info'); if(!box)return; const from=document.getElementById('transfer-from')?.value, pid=document.getElementById('transfer-product')?.value, vid=document.getElementById('transfer-variant')?.value; const inv=(appState.inventory||[]).find(i=>i.productId===pid&&i.variantId===vid&&(i.locationId||'GUD-01')===from); if(!from||!pid||!vid){box.textContent='Pilih gudang asal, produk, dan varian untuk melihat stok tersedia.';return;} const available=Math.max(0,Number(inv?.physicalStock||0)-Number(inv?.bookedStock||0)-Number(inv?.processStock||0)); box.innerHTML=`Stok tersedia di <strong>${locationName(from)}</strong>: <strong>${available}</strong> unit.`; }
+function renderAdminTransfers(){ const tbody=document.getElementById('tbody-admin-transfers'); if(!tbody)return; const rows=Array.isArray(appState.transfers)?appState.transfers:[]; const name=id=>locationName(id); tbody.innerHTML=rows.length?'':'<tr><td colspan="8" class="text-center">Belum ada transfer antar gudang.</td></tr>'; rows.forEach(t=>{const status=t.status||'Diajukan'; let action=''; if(status==='Diajukan')action=`<button class="btn btn-primary btn-sm" onclick="shipTransfer('${t.id}')">Kirim</button> <button class="btn btn-danger btn-sm" onclick="cancelTransfer('${t.id}')">Batal</button>`; else if(status==='Dikirim')action=`<button class="btn btn-success btn-sm" onclick="receiveTransfer('${t.id}')">Terima</button>`; else action='<span class="text-muted">-</span>'; const tr=document.createElement('tr'); tr.innerHTML=`<td><code>${t.transferNo||t.id}</code></td><td>${name(t.fromLocationId)}</td><td>${name(t.toLocationId)}</td><td><strong>${t.productName||'-'}</strong><br><small>${t.variantName||'-'}</small></td><td>${Number(t.qty||0)} ${t.unit||'Unit'}</td><td><span class="badge ${status==='Diterima'?'badge-success':status==='Dibatalkan'?'badge-danger':'badge-warning'}">${status}</span></td><td>${formatDateTime(t.createdAt)}</td><td>${action}</td>`; tbody.appendChild(tr);}); }
+async function createTransfer(e){e.preventDefault(); const payload={fromLocationId:document.getElementById('transfer-from').value,toLocationId:document.getElementById('transfer-to').value,productId:document.getElementById('transfer-product').value,variantId:document.getElementById('transfer-variant').value,qty:Number(document.getElementById('transfer-qty').value||0),note:document.getElementById('transfer-note').value.trim()}; if(payload.fromLocationId===payload.toLocationId)return showToast('Gudang asal dan tujuan harus berbeda.','warning'); try{const r=await apiRequest('/api/transfers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});closeTransferModal();await syncFetchState(true);renderAdminTransfers();showToast(r.message,'success');}catch(err){showToast(err.message||'Gagal mengajukan transfer.','danger');}}
+async function shipTransfer(id){try{const r=await apiRequest(`/api/transfers/${encodeURIComponent(id)}/ship`,{method:'PATCH'});await syncFetchState(true);renderAdminTransfers();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}}
+async function receiveTransfer(id){try{const r=await apiRequest(`/api/transfers/${encodeURIComponent(id)}/receive`,{method:'PATCH'});await syncFetchState(true);renderAdminTransfers();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}}
+async function cancelTransfer(id){try{const r=await apiRequest(`/api/transfers/${encodeURIComponent(id)}/cancel`,{method:'PATCH'});await syncFetchState(true);renderAdminTransfers();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}}
+
 function renderAdminWorkerReports(){
   const tbody=document.getElementById('tbody-admin-worker-reports'); if(!tbody)return;
   const worker=document.getElementById('admin-wr-worker')?.value||'';
@@ -1620,6 +1665,7 @@ function renderAdminWorkerReports(){
   const fill=(id,items,label)=>{const el=document.getElementById(id);if(!el)return;const old=el.value;el.innerHTML=`<option value="">${label}</option>`+items.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');el.value=old;};
   fill('admin-wr-worker',workers,'Semua pekerja'); fill('admin-wr-type',(appState.workTypes||[]),'Semua jenis pekerjaan'); fill('admin-wr-product',(appState.products||[]),'Semua produk');
   let reports=[...(appState.workReports||[])];
+  if(activeLocationId!=='ALL')reports=reports.filter(r=>(r.locationId||'GUD-01')===activeLocationId);
   if(worker)reports=reports.filter(r=>r.workerId===worker); if(type)reports=reports.filter(r=>r.workTypeId===type); if(product)reports=reports.filter(r=>r.productId===product);
   if(start)reports=reports.filter(r=>(r.createdAt||r.date||'').slice(0,10)>=start); if(end)reports=reports.filter(r=>(r.createdAt||r.date||'').slice(0,10)<=end);
   reports.sort((a,b)=>new Date(b.createdAt||b.date)-new Date(a.createdAt||a.date));
@@ -1769,7 +1815,7 @@ function renderAdminSalesClosing() {
   if (bookingSelect) {
     const selected = bookingSelect.value;
     bookingSelect.innerHTML = '<option value="">-- Pilih booking aktif yang akan di-closing --</option>';
-    (appState.sellerBookings || []).filter(b => b.status === 'Aktif').forEach(b => {
+    (appState.sellerBookings || []).filter(b => b.status === 'Aktif' && (activeLocationId==='ALL' || (b.locationId||'GUD-01')===activeLocationId)).forEach(b => {
       bookingSelect.innerHTML += `<option value="${b.id}">${b.bookingNo} — ${b.sellerName} — ${b.productName} (${b.variantName}) — ${b.qty} Unit</option>`;
     });
     if (selected) bookingSelect.value = selected;
@@ -1790,7 +1836,7 @@ function renderAdminSalesClosing() {
       <td><code>${c.transactionNo}</code></td>
       <td><span class="badge badge-purple">${c.resiNo}</span></td>
       <td>${c.closingDate}</td>
-      <td><strong>${c.sellerName}</strong></td>
+      <td><strong>${c.storeName||c.sellerName}</strong><br><small>${c.sellerName||'-'}</small></td>
       <td>${c.productName} (${c.variantName})</td>
       <td><strong class="text-success">${c.qty} Unit</strong></td>
       <td>Admin</td>
@@ -1802,11 +1848,11 @@ function renderAdminSalesClosing() {
 async function executeClosingProcess(resiNo) {
   if (!currentUser || !hasPermission('sales.closing')) { showToast('Anda tidak memiliki hak akses untuk melakukan closing penjualan.', 'danger'); return; }
   const selectedBookingId = document.getElementById('closing-booking-id')?.value;
-  const activeBooking = (appState.sellerBookings || []).find(b => b.id === selectedBookingId && b.status === 'Aktif');
+  const activeBooking = (appState.sellerBookings || []).find(b => b.id === selectedBookingId && b.status === 'Aktif' && (activeLocationId==='ALL' || (b.locationId||'GUD-01')===activeLocationId));
   if (!activeBooking) { showToast(`Pilih booking aktif yang sesuai sebelum melakukan closing resi ${resiNo}.`, 'danger'); return; }
   showConfirmDialog('Konfirmasi Closing Penjualan', `Apakah Anda yakin ingin melakukan closing resi <strong>${resiNo}</strong> untuk booking <strong>${activeBooking.bookingNo}</strong> (${activeBooking.productName} - ${activeBooking.qty} Unit)?`, async () => {
     try {
-      await apiRequest('/api/resi/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resiNo}) });
+      await apiRequest('/api/resi/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resiNo,bookingId:selectedBookingId}) });
       const res=await apiRequest('/api/sales-closings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resiNo,bookingId:selectedBookingId}) });
       await syncFetchState(true);
       renderAdminSalesClosing();
@@ -2010,7 +2056,7 @@ async function renderAdminUsers() {
 function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function editUser(id){
   try{const res=await apiRequest(`${API_BASE}/users`); const u=(res.data||[]).find(x=>x.id===id); if(!u)return showToast('Pengguna tidak ditemukan.','danger');
-    document.getElementById('usr-id').value=u.id; document.getElementById('usr-name').value=u.name||''; document.getElementById('usr-username').value=u.username||''; document.getElementById('usr-password').value=''; document.getElementById('usr-role').value=u.role||'seller'; document.getElementById('usr-email').value=u.email||''; document.getElementById('usr-phone').value=u.phone||''; document.getElementById('modal-user-title').textContent='Edit Akun & Hak Akses'; document.getElementById('usr-status').value=u.status||'active'; renderUserPermissionChecks(u.permissions||[]); document.getElementById('modal-user').classList.add('active');
+    document.getElementById('usr-id').value=u.id; document.getElementById('usr-name').value=u.name||''; document.getElementById('usr-username').value=u.username||''; document.getElementById('usr-password').value=''; document.getElementById('usr-role').value=u.role||'seller'; document.getElementById('usr-email').value=u.email||''; document.getElementById('usr-phone').value=u.phone||''; document.getElementById('modal-user-title').textContent='Edit Akun & Hak Akses'; document.getElementById('usr-status').value=u.status||'active'; renderUserPermissionChecks(u.permissions||[]); renderUserLocationChecks(appState.userLocations?.[u.id]||[]); document.getElementById('modal-user').classList.add('active');
   }catch(e){showToast(e.message||'Gagal membuka pengguna.','danger');}
 }
 async function deleteUser(id){ showConfirmDialog('Hapus Akun','Hapus akun ini secara permanen?',async()=>{try{const r=await apiRequest(`${API_BASE}/users/${id}`,{method:'DELETE'});showToast(r.message||'Akun dihapus.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menghapus akun.','danger');}}); }
@@ -2053,7 +2099,7 @@ function renderAdminActivityLogs() {
 // ==========================================================================
 // 11. WORKER GUDANG & SELLER VIEWS
 // ==========================================================================
-function renderGudangDashboard(){if(!currentUser)return;const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range));const targetQty=targets.reduce((s,t)=>s+Number(t.targetQty||0),0),doneQty=reports.reduce((s,r)=>s+Number(r.qty||0),0),wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0),unpaid=getWorkerAvailableWage(currentUser.id);const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerText=v;};set('gudang-stat-today-target',`${targetQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-done',`${doneQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-wage',formatRupiah(wage));set('gudang-stat-unpaid',formatRupiah(unpaid));set('gudang-period-label',range.label);set('gudang-dashboard-report-period',range.label);const reportBody=document.getElementById('tbody-gudang-dashboard-reports');if(reportBody){reportBody.innerHTML=reports.length?'':'<tr><td colspan="6" class="text-center">Belum ada laporan pekerjaan pada periode ini.</td></tr>';reports.slice(0,50).forEach(r=>{reportBody.innerHTML+=`<tr><td>${formatDateTime(r.createdAt||r.date)}</td><td><strong>${r.workTypeName||'-'}</strong></td><td>${r.productName||'-'} (${r.variantName||'-'})</td><td>${Number(r.qty||0)} Unit</td><td>${r.condition||'-'}</td><td><strong>${formatRupiah(r.totalWage||0)}</strong></td></tr>`;});}const tbody=document.getElementById('tbody-gudang-today-targets');if(!tbody)return;tbody.innerHTML='';if(!targets.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center">Belum ada target pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}targets.forEach(t=>{const wt=(appState.workTypes||[]).find(x=>x.id===t.workTypeId),p=(appState.products||[]).find(x=>x.id===t.productId),v=(p?.variants||[]).find(x=>x.id===t.variantId),done=reports.filter(r=>r.workTypeId===t.workTypeId&&r.productId===t.productId&&r.variantId===t.variantId&&(r.createdAt||'').slice(0,10)===t.date).reduce((s,r)=>s+Number(r.qty||0),0),pct=t.targetQty?Math.min(100,Math.round(done/t.targetQty*100)):0,tr=document.createElement('tr');tr.innerHTML=`<td>${t.date}<br><strong>${wt?.name||'-'}</strong></td><td>${p?.name||'-'} (${v?.name||'-'})</td><td>${Number(t.targetQty||0)} Unit</td><td><strong class="text-success">${done} Unit</strong></td><td><div class="progress-label">${pct}%</div><div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div></td><td class="text-right"><button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}','${t.productId}','${t.variantId}')">Lapor Kerja</button></td>`;tbody.appendChild(tr);});}
+function renderGudangDashboard(){if(!currentUser)return;const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&(activeLocationId==='ALL'||(r.locationId||'GUD-01')===activeLocationId)&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&(activeLocationId==='ALL'||(t.locationId||'GUD-01')===activeLocationId)&&inDateRange(`${t.date}T12:00:00`,range));const targetQty=targets.reduce((s,t)=>s+Number(t.targetQty||0),0),doneQty=reports.reduce((s,r)=>s+Number(r.qty||0),0),wage=reports.reduce((s,r)=>s+Number(r.totalWage||0),0),unpaid=getWorkerAvailableWage(currentUser.id);const set=(id,v)=>{const e=document.getElementById(id);if(e)e.innerText=v;};set('gudang-stat-today-target',`${targetQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-done',`${doneQty.toLocaleString('id-ID')} Unit`);set('gudang-stat-today-wage',formatRupiah(wage));set('gudang-stat-unpaid',formatRupiah(unpaid));set('gudang-period-label',range.label);set('gudang-dashboard-report-period',range.label);const reportBody=document.getElementById('tbody-gudang-dashboard-reports');if(reportBody){reportBody.innerHTML=reports.length?'':'<tr><td colspan="6" class="text-center">Belum ada laporan pekerjaan pada periode ini.</td></tr>';reports.slice(0,50).forEach(r=>{reportBody.innerHTML+=`<tr><td>${formatDateTime(r.createdAt||r.date)}</td><td><strong>${r.workTypeName||'-'}</strong></td><td>${r.productName||'-'} (${r.variantName||'-'})</td><td>${Number(r.qty||0)} Unit</td><td>${r.condition||'-'}</td><td><strong>${formatRupiah(r.totalWage||0)}</strong></td></tr>`;});}const tbody=document.getElementById('tbody-gudang-today-targets');if(!tbody)return;tbody.innerHTML='';if(!targets.length){tbody.innerHTML=`<tr><td colspan="6" class="text-center">Belum ada target pekerjaan pada periode ${range.label.toLowerCase()}.</td></tr>`;return;}targets.forEach(t=>{const wt=(appState.workTypes||[]).find(x=>x.id===t.workTypeId),p=(appState.products||[]).find(x=>x.id===t.productId),v=(p?.variants||[]).find(x=>x.id===t.variantId),done=reports.filter(r=>r.workTypeId===t.workTypeId&&r.productId===t.productId&&r.variantId===t.variantId&&(r.createdAt||'').slice(0,10)===t.date).reduce((s,r)=>s+Number(r.qty||0),0),pct=t.targetQty?Math.min(100,Math.round(done/t.targetQty*100)):0,tr=document.createElement('tr');tr.innerHTML=`<td>${t.date}<br><strong>${wt?.name||'-'}</strong></td><td>${p?.name||'-'} (${v?.name||'-'})</td><td>${Number(t.targetQty||0)} Unit</td><td><strong class="text-success">${done} Unit</strong></td><td><div class="progress-label">${pct}%</div><div class="progress-bar-wrapper"><div class="progress-fill ${pct>=100?'success':''}" style="width:${pct}%"></div></div></td><td class="text-right"><button class="btn btn-primary btn-sm" onclick="openWorkReportForm('${t.workTypeId}','${t.productId}','${t.variantId}')">Lapor Kerja</button></td>`;tbody.appendChild(tr);});}
 function openGudangSummary(type){const range=getGudangRange(),reports=(appState.workReports||[]).filter(r=>r.workerId===currentUser.id&&inDateRange(r.createdAt||r.date,range)),targets=(appState.workTargets||[]).filter(t=>t.assignedToUserId===currentUser.id&&inDateRange(`${t.date}T12:00:00`,range)),body=document.getElementById('gudang-summary-body'),title=document.getElementById('gudang-summary-title');if(!body)return;const totalTarget=targets.reduce((s,x)=>s+Number(x.targetQty||0),0),totalDone=reports.reduce((s,x)=>s+Number(x.qty||0),0),totalWage=reports.reduce((s,x)=>s+Number(x.totalWage||0),0);if(title)title.textContent={target:'Ringkasan Target Pekerjaan',done:'Ringkasan Pekerjaan Selesai',wage:'Ringkasan Pendapatan',unpaid:'Upah Belum Dicairkan'}[type]||'Ringkasan Dashboard';if(type==='unpaid'){body.innerHTML=`<div class="summary-highlight"><span>Saldo yang masih tersedia untuk dicairkan</span><strong>${formatRupiah(getWorkerAvailableWage(currentUser.id))}</strong></div><p class="text-muted" style="margin-top:12px">Saldo ini adalah akumulasi seluruh upah yang sudah diperoleh, dikurangi pengajuan yang masih diproses/disetujui dan pencairan yang sudah dibayar.</p><div class="report-actions"><button class="btn btn-primary" onclick="closeGudangSummary();switchView('gudang-payout-request')">Ajukan Pencairan</button></div>`;}else{body.innerHTML=`<div class="variant-report-grid"><div><small>Total Target</small><strong>${totalTarget.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Selesai</small><strong>${totalDone.toLocaleString('id-ID')} Unit</strong></div><div><small>Total Upah</small><strong>${formatRupiah(totalWage)}</strong></div></div><div class="summary-list">${reports.slice(0,20).map(r=>`<div><span>${r.workTypeName||'-'} — ${r.productName||'-'} (${r.variantName||'-'})</span><strong>${Number(r.qty||0)} Unit • ${formatRupiah(r.totalWage||0)}</strong></div>`).join('')||'<p class="text-muted">Belum ada laporan pada periode ini.</p>'}</div>`;}document.getElementById('modal-gudang-summary')?.classList.add('active');}
 function closeGudangSummary(){document.getElementById('modal-gudang-summary')?.classList.remove('active');}
 
@@ -2182,7 +2228,7 @@ function renderSellerDashboard() {
   });
 }
 
-function renderSellerStockView(){const tbody=document.getElementById('tbody-seller-stock-catalog');if(!tbody)return;tbody.innerHTML='';const q=(document.getElementById('seller-stock-search')?.value||'').trim().toLowerCase(),cat=document.getElementById('seller-stock-category')?.value||'',products=(appState.products||[]).filter(p=>(!cat||p.categoryId===cat));const inventory=appState.inventory||[];let rows=0;products.forEach(p=>(p.variants||[]).forEach(v=>{const text=`${p.name} ${v.name} ${v.sku||p.sku||''}`.toLowerCase();if(q&&!text.includes(q))return;const inv=inventory.find(i=>i.productId===p.id&&i.variantId===v.id)||{physicalStock:0,bookedStock:0},avail=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0));rows++;const tr=document.createElement('tr');tr.innerHTML=`<td><strong>${p.name}</strong><br><small class="text-primary">${v.name}</small></td><td><code>${v.sku||p.sku||'-'}</code></td><td><strong class="text-success" style="font-size:16px;">${avail} ${p.unit||'Unit'}</strong></td><td>${p.warehouseLocation||'-'}</td><td class="text-right"><button class="btn btn-purple btn-sm" style="background:var(--purple);color:#fff;" ${avail<=0?'disabled':''} onclick="quickBookProduct('${p.id}','${v.id}')">Booking Sekarang</button></td>`;tbody.appendChild(tr);}));if(!rows)tbody.innerHTML=`<tr><td colspan="5" class="text-center">Tidak ada stok yang sesuai pencarian.</td></tr>`;const catSel=document.getElementById('seller-stock-category');if(catSel&&catSel.options.length<=1)catSel.innerHTML='<option value="">Semua Kategori</option>'+(appState.categories||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
+function renderSellerStockView(){const tbody=document.getElementById('tbody-seller-stock-catalog');if(!tbody)return;tbody.innerHTML='';const q=(document.getElementById('seller-stock-search')?.value||'').trim().toLowerCase(),cat=document.getElementById('seller-stock-category')?.value||'',products=(appState.products||[]).filter(p=>(!cat||p.categoryId===cat));const inventory=getVisibleInventory();let rows=0;products.forEach(p=>(p.variants||[]).forEach(v=>{const text=`${p.name} ${v.name} ${v.sku||p.sku||''}`.toLowerCase();if(q&&!text.includes(q))return;const inv=inventory.find(i=>i.productId===p.id&&i.variantId===v.id)||{physicalStock:0,bookedStock:0},avail=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0));rows++;const tr=document.createElement('tr');tr.innerHTML=`<td><strong>${p.name}</strong><br><small class="text-primary">${v.name}</small></td><td><code>${v.sku||p.sku||'-'}</code></td><td><strong class="text-success" style="font-size:16px;">${avail} ${p.unit||'Unit'}</strong></td><td>${p.warehouseLocation||'-'}</td><td class="text-right"><button class="btn btn-purple btn-sm" style="background:var(--purple);color:#fff;" ${avail<=0?'disabled':''} onclick="quickBookProduct('${p.id}','${v.id}')">Booking Sekarang</button></td>`;tbody.appendChild(tr);}));if(!rows)tbody.innerHTML=`<tr><td colspan="5" class="text-center">Tidak ada stok yang sesuai pencarian.</td></tr>`;const catSel=document.getElementById('seller-stock-category');if(catSel&&catSel.options.length<=1)catSel.innerHTML='<option value="">Semua Kategori</option>'+(appState.categories||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
 
 function renderSellerBookingHistory() {
   const tbody = document.getElementById('tbody-seller-booking-history');
@@ -2710,7 +2756,7 @@ function initModalActions() {
     btnOpenUser.addEventListener('click', () => {
       const form = document.getElementById('form-user');
       if (form) form.reset();
-      document.getElementById('usr-id').value=''; document.getElementById('modal-user-title').textContent='Tambah Akun Pengguna System'; document.getElementById('usr-status').value='active'; renderUserPermissionChecks([]);
+      document.getElementById('usr-id').value=''; document.getElementById('modal-user-title').textContent='Tambah Akun Pengguna System'; document.getElementById('usr-status').value='active'; renderUserPermissionChecks([]); renderUserLocationChecks([]);
       const modal = document.getElementById('modal-user');
       if (modal) modal.classList.add('active');
     });
@@ -2719,9 +2765,9 @@ function initModalActions() {
   const btnSaveUser = document.getElementById('btn-save-user');
   if (btnSaveUser) btnSaveUser.addEventListener('click', async () => {
     const id=document.getElementById('usr-id').value.trim(), name=document.getElementById('usr-name').value.trim(), username=document.getElementById('usr-username').value.trim(), password=document.getElementById('usr-password').value, role=document.getElementById('usr-role').value, email=document.getElementById('usr-email').value.trim(), phone=document.getElementById('usr-phone').value.trim(), status=document.getElementById('usr-status').value;
-    const permissions=[...document.querySelectorAll('#usr-permissions input:checked')].map(x=>x.value);
+    const permissions=[...document.querySelectorAll('#usr-permissions input:checked')].map(x=>x.value); const locationIds=[...document.querySelectorAll('#usr-locations input:checked')].map(x=>x.value);
     if(!name||!username||(!id&&!password)) return showToast('Nama, username, dan password wajib diisi untuk akun baru.','warning');
-    try{const payload={name,username,role,email,phone,status,permissions};if(password)payload.password=password; const res=await apiRequest(`${API_BASE}/users${id?'/'+id:''}`,{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); document.getElementById('modal-user')?.classList.remove('active');showToast(res.message||'Akun berhasil disimpan.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menyimpan akun.','danger');}
+    try{const payload={name,username,role,email,phone,status,permissions};if(password)payload.password=password; const res=await apiRequest(`${API_BASE}/users${id?'/'+id:''}`,{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const savedId=res.data?.id||id; if(savedId) await apiRequest(`${API_BASE}/users/${encodeURIComponent(savedId)}/locations`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({locationIds})}); document.getElementById('modal-user')?.classList.remove('active');showToast(res.message||'Akun berhasil disimpan.','success');renderAdminUsers();}catch(e){showToast(e.message||'Gagal menyimpan akun.','danger');}
   });
 
   // App Settings Form Submit
@@ -2777,16 +2823,7 @@ function initModalActions() {
       const barcodeInput = document.getElementById('simulated-barcode-input');
       const val = (barcodeInput && barcodeInput.value.trim()) ? barcodeInput.value.trim() : 'JX-88391204-ID';
       
-      const modalScan = document.getElementById('modal-barcode-scanner');
-      if (modalScan) modalScan.classList.remove('active');
-
-      const closingNav = document.querySelector('.nav-link[data-view="admin-sales-closing"]');
-      if (closingNav) closingNav.click();
-
-      const inputResi = document.getElementById('input-closing-resi-no');
-      if (inputResi) inputResi.value = val;
-
-      showToast(`Resi ${val} terpindai! Klik 'Cari & Proses Closing'`, "success");
+      handleScannedResiValue(val,{autoProcess:true});
     });
   }
 
@@ -2933,12 +2970,14 @@ async function loadDashboardSummary(){
   }catch(_){return null;}
 }
 
+function renderLocationManagement(){const box=document.getElementById('location-list');if(!box)return;const list=appState.locations||availableLocations||[];box.innerHTML=list.map(l=>`<div class="location-row"><div><strong>🏢 ${l.name}</strong><small>${l.id}${l.address?' • '+l.address:''}</small></div><span class="badge ${l.status==='inactive'?'badge-danger':'badge-success'}">${l.status==='inactive'?'Nonaktif':'Aktif'}</span></div>`).join('')||'<div class="text-muted">Belum ada lokasi.</div>'; }
+
 async function renderAdminDashboard(){
   const cats=appState.categories||[]; const grid=document.getElementById('dashboard-category-grid'); if(!grid)return;
   const catCount=document.getElementById('dash-category-count'); if(catCount)catCount.innerText=`${cats.length} kategori`;
   grid.innerHTML=cats.length?cats.map(c=>{const products=(appState.products||[]).filter(p=>p.categoryId===c.id); const variants=products.reduce((n,p)=>n+(p.variants||[]).length,0); const stock=products.reduce((sum,p)=>sum+(p.variants||[]).reduce((s,v)=>s+Number((getInventory(p.id,v.id)||{}).physicalStock||0),0),0); return `<button class="category-dashboard-card" onclick="openDashboardCategory('${c.id}')"><span class="category-card-icon"><i class="fa-solid fa-boxes-stacked"></i></span><span class="category-card-main"><strong>${c.name}</strong><small>${products.length} produk • ${variants} variasi</small><em>${stock.toLocaleString('id-ID')} total unit</em></span><i class="fa-solid fa-chevron-right"></i></button>`;}).join(''):'<div class="empty-state">Belum ada kategori. Tambahkan kategori dan produk dari menu Manajemen Produk.</div>';
-  const bookings=(appState.sellerBookings||[]).filter(b=>['Menunggu Persetujuan','Aktif'].includes(b.status)); const payouts=(appState.payoutRequests||[]).filter(p=>p.status==='Menunggu Persetujuan');
-  const inv=appState.inventory||[]; const fallbackBooked=inv.reduce((s,x)=>s+Number(x.bookedStock||0),0); const payoutTotal=payouts.reduce((s,p)=>s+Number(p.amount||0),0);
+  const bookings=(appState.sellerBookings||[]).filter(b=>(activeLocationId==='ALL'||(b.locationId||'GUD-01')===activeLocationId)&&['Menunggu Persetujuan','Aktif'].includes(b.status)); const payouts=(appState.payoutRequests||[]).filter(p=>(activeLocationId==='ALL'||(p.locationId||'GUD-01')===activeLocationId)&&p.status==='Menunggu Persetujuan');
+  const inv=getVisibleInventory(); const fallbackBooked=inv.reduce((s,x)=>s+Number(x.bookedStock||0),0); const payoutTotal=payouts.reduce((s,p)=>s+Number(p.amount||0),0);
   const summary=await loadDashboardSummary();
   const booked=summary?.totalBookedStock ?? fallbackBooked;
   document.getElementById('dash-booking-count').innerText=`${Number(booked).toLocaleString('id-ID')} unit`;
@@ -2948,20 +2987,44 @@ async function renderAdminDashboard(){
   renderAdminCharts(summary?.stockIn||0,summary?.stockOut||0,sold,available,booked,damaged,returned);
 }
 
+function renderUserLocationChecks(selected=[]){const box=document.getElementById('usr-locations');if(!box)return;const ids=new Set(selected||[]);box.innerHTML=(appState.locations||availableLocations||[]).map(l=>`<label class="permission-chip"><input type="checkbox" value="${l.id}" ${ids.has(l.id)?'checked':''}><span>🏢 ${l.name}</span></label>`).join('')||'<small class="text-muted">Belum ada lokasi gudang.</small>'; }
+
 function getProfileRecord(){ if(!currentUser)return {}; return appState.userProfiles?.[currentUser.id]||{}; }
 async function loadMyProfile(){if(!currentUser)return{};try{const r=await apiRequest(`${API_BASE}/me/profile`);const p=r.data||{};if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),...p,avatarData:p.avatarData||getProfileRecord().avatarData||''};currentUser={...currentUser,name:p.name||currentUser.name,username:p.username||currentUser.username,email:p.email||currentUser.email||'',phone:p.phone||currentUser.phone||''};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));return appState.userProfiles[currentUser.id];}catch{return getProfileRecord();}}
 async function renderProfileView(){if(!currentUser)return;const p=await loadMyProfile(),profile={...currentUser,...p};document.querySelectorAll('[data-profile-name]').forEach(e=>e.textContent=profile.name||currentUser.name);document.querySelectorAll('[data-profile-role]').forEach(e=>e.textContent=(currentUser.role||'').toUpperCase());document.querySelectorAll('[data-profile-field="name"]').forEach(e=>e.value=profile.name||'');document.querySelectorAll('[data-profile-field="username"]').forEach(e=>e.value=profile.username||'');document.querySelectorAll('[data-profile-field="email"]').forEach(e=>e.value=profile.email||'');document.querySelectorAll('[data-profile-field="phone"]').forEach(e=>e.value=profile.phone||'');setProfilePhotoUI(profile.avatarData||'');}
 function setProfilePhotoUI(data){document.querySelectorAll('[data-profile-image]').forEach(img=>{img.src=data||'';img.style.display=data?'block':'none';});document.querySelectorAll('[data-profile-fallback]').forEach(el=>{el.style.display=data?'none':'flex';el.textContent=(currentUser?.name||'U').trim().charAt(0).toUpperCase();});const mini=document.getElementById('user-avatar');if(mini){if(data)mini.innerHTML=`<img src="${data}" alt="Avatar">`;else mini.textContent=(currentUser?.name||'U').charAt(0).toUpperCase();}}
-async function saveProfileForm(form){if(!currentUser)return;const payload={};['name','username','email','phone'].forEach(k=>{const el=form.querySelector(`[data-profile-field="${k}"]`);if(el)payload[k]=el.value.trim();});try{const res=await apiRequest(`${API_BASE}/me/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentUser={...currentUser,...(res.user||{})};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),...payload};document.getElementById('user-display-name').textContent=currentUser.name;renderProfileView();showToast(res.message||'Profil berhasil diperbarui.','success');}catch(err){showToast(err.message||'Gagal memperbarui profil.','danger');}}
+async function saveProfileForm(form){if(!currentUser)return;const payload={};['name','username','email','phone','storeName'].forEach(k=>{const el=form.querySelector(`[data-profile-field="${k}"]`);if(el)payload[k]=el.value.trim();});try{const res=await apiRequest(`${API_BASE}/me/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentUser={...currentUser,...(res.user||{})};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),...payload};document.getElementById('user-display-name').textContent=currentUser.name;renderProfileView();showToast(res.message||'Profil berhasil diperbarui.','success');}catch(err){showToast(err.message||'Gagal memperbarui profil.','danger');}}
 document.addEventListener('submit',e=>{if(e.target.matches('[data-profile-form]')){e.preventDefault();saveProfileForm(e.target);}});
 document.addEventListener('change',e=>{if(e.target.matches('[data-profile-upload]')){const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024)return showToast('Ukuran foto maksimal 2 MB.','warning');if(!f.type.startsWith('image/'))return showToast('Pilih file gambar.','warning');const r=new FileReader();r.onload=async()=>{try{const res=await apiRequest(`${API_BASE}/me/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatarData:r.result})});setProfilePhotoUI(r.result);if(res.user){currentUser={...currentUser,...res.user};localStorage.setItem('gudangbat_user',JSON.stringify(currentUser));}if(!appState.userProfiles)appState.userProfiles={};appState.userProfiles[currentUser.id]={...getProfileRecord(),avatarData:r.result};showToast('Foto profil berhasil diperbarui.','success');}catch(err){showToast(err.message||'Gagal menyimpan foto profil.','danger');}};r.readAsDataURL(f);}});
 
 let barcodeStream=null, barcodeTimer=null;
 async function startCameraScanner(){
   try{stopCameraScanner(); barcodeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false}); const v=document.getElementById('barcode-camera-video'); if(!v)return; v.srcObject=barcodeStream; v.style.display='block'; document.getElementById('barcode-camera-icon')?.style.setProperty('display','none'); await v.play();
-    if('BarcodeDetector' in window){const detector=new BarcodeDetector({formats:['code_128','code_39','ean_13','ean_8','qr_code']}); barcodeTimer=setInterval(async()=>{try{const codes=await detector.detect(v); if(codes[0]?.rawValue){document.getElementById('simulated-barcode-input').value=codes[0].rawValue; showToast(`Resi ${codes[0].rawValue} terbaca.`,'success'); stopCameraScanner();}}catch{}},600);} else showToast('Kamera aktif. Browser ini belum mendukung pembacaan barcode otomatis; masukkan nomor resi secara manual.','info');
+    if('BarcodeDetector' in window){const detector=new BarcodeDetector({formats:['code_128','code_39','ean_13','ean_8','qr_code']}); barcodeTimer=setInterval(async()=>{try{const codes=await detector.detect(v); if(codes[0]?.rawValue){handleScannedResiValue(codes[0].rawValue,{autoProcess:true});}}catch{}},600);} else showToast('Kamera aktif. Browser ini belum mendukung pembacaan barcode otomatis; masukkan nomor resi secara manual.','info');
   }catch(err){showToast('Kamera tidak dapat diakses. Izinkan permission kamera di browser.','danger');}
 }
+function handleScannedResiValue(val, {autoProcess=true}={}) {
+  const resi=String(val||'').trim();
+  if(!resi) return;
+  const input=document.getElementById('input-closing-resi-no');
+  if(input) input.value=resi;
+  const bookingSelect=document.getElementById('closing-booking-id');
+  const active=(appState.sellerBookings||[]).filter(b=>b.status==='Aktif' && (activeLocationId==='ALL' || (b.locationId||'GUD-01')===activeLocationId));
+  if(bookingSelect && !bookingSelect.value && active.length===1) bookingSelect.value=active[0].id;
+  const modal=document.getElementById('modal-barcode-scanner');
+  if(modal) modal.classList.remove('active');
+  stopCameraScanner();
+  const selected=bookingSelect?.value;
+  if(autoProcess && selected){
+    showToast(`Resi ${resi} terbaca. Data toko, barang, varian, dan jumlah akan dicatat otomatis.`,'success');
+    setTimeout(()=>executeClosingProcess(resi),120);
+  } else {
+    const closingNav=document.querySelector('.nav-link[data-view="admin-sales-closing"]');
+    if(closingNav) closingNav.click();
+    showToast(`Resi ${resi} terbaca. Pilih booking aktif untuk pencatatan otomatis.`,'success');
+  }
+}
+
 function stopCameraScanner(){if(barcodeTimer){clearInterval(barcodeTimer);barcodeTimer=null;} if(barcodeStream){barcodeStream.getTracks().forEach(t=>t.stop());barcodeStream=null;} const v=document.getElementById('barcode-camera-video');if(v){v.pause?.();v.srcObject=null;v.style.display='none';} document.getElementById('barcode-camera-icon')?.style.setProperty('display','block');}
 document.addEventListener('click',e=>{if(e.target.closest('#btn-start-camera-scan'))startCameraScanner(); if(e.target.closest('.modal-close')||e.target.closest('#btn-submit-scanned-barcode'))setTimeout(stopCameraScanner,50);});
 document.getElementById('btn-dashboard-refresh')?.addEventListener('click',()=>syncFetchState());
@@ -2973,7 +3036,8 @@ document.addEventListener('change', (e) => {
     const file=e.target.files?.[0]; if(!file)return;
     if(!file.type.startsWith('image/')) return showToast('Pilih file gambar untuk logo perusahaan.','warning');
     if(file.size>2*1024*1024) return showToast('Ukuran logo maksimal 2 MB.','warning');
-    const r=new FileReader(); r.onload=()=>{ const input=document.getElementById('setting-company-logo'); if(input){input.value=r.result; renderCompanyLogo();} }; r.readAsDataURL(file);
+    const r=new FileReader(); r.onload=()=>{ const input=document.getElementById('setting-company-logo'); if(input){input.value=r.result; renderCompanyLogo();
+        loadLocations().catch(()=>{});} }; r.readAsDataURL(file);
   }
 });
 
