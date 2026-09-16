@@ -68,10 +68,27 @@ function getAuthHeaders(extra = {}) {
   return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}), 'X-Location-ID': activeLocationId || 'GUD-01' };
 }
 
-async function apiRequest(url, options = {}) {
-  const res = await fetch(url, { ...options, headers: getAuthHeaders(options.headers || {}) });
+let authRefreshInFlight = null;
+async function refreshAuthSession() {
+  if (authRefreshInFlight) return authRefreshInFlight;
+  const token = localStorage.getItem('gudangbat_token');
+  if (!token) return false;
+  authRefreshInFlight = fetch(`${API_BASE}/session/refresh`, { method:'POST', headers:getAuthHeaders(), cache:'no-store' })
+    .then(async r => { const d=await r.json().catch(()=>null); if(!r.ok || !d?.success || !d.token) return false; localStorage.setItem('gudangbat_token',d.token); if(d.user){ currentUser={...currentUser,...d.user}; localStorage.setItem('gudangbat_user',JSON.stringify(currentUser)); } return true; })
+    .catch(()=>false)
+    .finally(()=>{authRefreshInFlight=null;});
+  return authRefreshInFlight;
+}
+async function apiRequest(url, options = {}, allowAuthRetry = true) {
+  const res = await fetch(url, { ...options, headers: getAuthHeaders(options.headers || {}), cache:'no-store' });
   let data = null;
   try { data = await res.json(); } catch {}
+  if (res.status === 401 && allowAuthRetry && url !== `${API_BASE}/login` && url !== `${API_BASE}/session/refresh`) {
+    const refreshed = await refreshAuthSession();
+    if (refreshed) return apiRequest(url, options, false);
+    localStorage.removeItem('gudangbat_token');
+    localStorage.removeItem('gudangbat_user');
+  }
   if (!res.ok || data?.success === false) throw new Error(data?.message || `Permintaan gagal (${res.status}).`);
   return data;
 }
@@ -954,7 +971,7 @@ function initEventListeners() {
   document.getElementById('transfer-product')?.addEventListener('change',populateTransferVariants);
   document.getElementById('transfer-from')?.addEventListener('change',updateTransferStockInfo);
   document.getElementById('transfer-variant')?.addEventListener('change',updateTransferStockInfo);
-  document.getElementById('btn-add-location')?.addEventListener('click',async()=>{const name=document.getElementById('new-location-name')?.value.trim(),code=document.getElementById('new-location-code')?.value.trim().toUpperCase(),address=document.getElementById('new-location-address')?.value.trim(),manager=document.getElementById('new-location-manager')?.value.trim();if(!name||!code)return showToast('Kode dan nama gudang wajib diisi.','warning');try{const r=await apiRequest(`${API_BASE}/locations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,address,manager})});document.getElementById('new-location-name').value='';document.getElementById('new-location-code').value='';document.getElementById('new-location-address').value='';document.getElementById('new-location-manager').value='';await syncFetchState(true);await loadLocations();renderLocationManagement();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}});
+  document.getElementById('btn-add-location')?.addEventListener('click',async()=>{const name=document.getElementById('new-location-name')?.value.trim(),code=document.getElementById('new-location-code')?.value.trim().toUpperCase(),address=document.getElementById('new-location-address')?.value.trim(),manager=document.getElementById('new-location-manager')?.value.trim();if(!name||!code)return showToast('Kode dan nama gudang wajib diisi.','warning');try{const r=await apiRequest(`${API_BASE}/locations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,address,manager})});document.getElementById('new-location-name').value='';document.getElementById('new-location-code').value='';document.getElementById('new-location-address').value='';document.getElementById('new-location-manager').value='';await loadLocations();appState.locations=[...availableLocations];renderLocationManagement();renderUserLocationChecks();showToast(r.message,'success');}catch(e){showToast(e.message,'danger');}});
   document.getElementById('seller-dashboard-search')?.addEventListener('input',()=>renderSellerStockView());
   initModalActions();
 }
