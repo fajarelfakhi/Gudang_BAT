@@ -10,7 +10,8 @@ const fs = require('fs');
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 const DATABASE_URL = process.env.DATABASE_URL;
-const JWT_SECRET = process.env.JWT_SECRET || 'GANTI_DENGAN_RAHASIA_PANJANG_SEBELUM_PRODUKSI';
+let JWT_SECRET = process.env.JWT_SECRET || '';
+const FALLBACK_JWT_SECRET = 'GUDANG-BAT-LOCAL-SECRET-CHANGE-ME';
 if (!DATABASE_URL) throw new Error('DATABASE_URL wajib diisi.');
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
@@ -74,7 +75,10 @@ async function auth(req,res,next) {
     const normalizedRole=normalizeRole(u.role); const rolePermissions=await getRolePermissions(normalizedRole);
     const permissions=(Array.isArray(u.permissions)&&u.permissions.length?u.permissions:rolePermissions);
     req.user={...publicUser({...u,role:normalizedRole}), permissions}; next();
-  } catch { return res.status(401).json({success:false,message:'Sesi tidak valid atau sudah berakhir.'}); }
+  } catch (err) {
+    const reason = err?.name === 'TokenExpiredError' ? 'expired' : 'invalid';
+    return res.status(401).json({success:false,message: reason==='expired' ? 'Sesi telah berakhir. Silakan login kembali.' : 'Sesi tidak valid. Silakan login kembali.', code:'AUTH_'+reason.toUpperCase()});
+  }
 }
 function requirePermission(permission) {
   return (req,res,next) => {
@@ -322,7 +326,7 @@ app.post('/api/login', async (req,res)=>{
     if(u.status === 'pending') return res.status(403).json({success:false,message:'Akun Anda masih dalam status Menunggu Persetujuan Admin.'});
     if(u.status !== 'active') return res.status(403).json({success:false,message:'Akun Anda telah dinonaktifkan atau ditolak.'});
     if(!(await bcrypt.compare(String(password),u.password_hash))) return res.status(401).json({success:false,message:'Username atau password salah.'});
-    const user=publicUser(u); const token=jwt.sign({id:user.id,role:user.role,username:user.username},JWT_SECRET,{expiresIn:'24h'});
+    const user=publicUser(u); const token=jwt.sign({id:user.id,role:user.role,username:user.username},JWT_SECRET,{expiresIn: process.env.JWT_EXPIRES_IN || '7d'});
     res.json({success:true,message:'Login berhasil.',token,user});
   } catch(e){ console.error(e); res.status(500).json({success:false,message:'Terjadi kesalahan saat login.'}); }
 });
@@ -434,6 +438,14 @@ app.patch('/api/users/:id', auth, requireRole('admin'), async (req,res)=>{
 
 app.delete('/api/users/:id', auth, requireRole('admin'), async (req,res)=>{
   try { if(req.params.id===req.user.id)return res.status(400).json({success:false,message:'Akun yang sedang digunakan tidak dapat dihapus.'}); const r=await pool.query('DELETE FROM users WHERE id=$1 RETURNING id,name,username',[req.params.id]); if(!r.rowCount)return res.status(404).json({success:false,message:'Pengguna tidak ditemukan.'}); res.json({success:true,message:`Akun ${r.rows[0].name} berhasil dihapus.`}); } catch(e){res.status(500).json({success:false,message:'Gagal menghapus akun pengguna.'});}
+});
+
+app.post('/api/session/refresh', auth, async (req,res)=>{
+  try {
+    const u=req.user;
+    const token=jwt.sign({id:u.id,role:u.role,username:u.username},JWT_SECRET,{expiresIn: process.env.JWT_EXPIRES_IN || '7d'});
+    res.json({success:true,token,user:u});
+  } catch(e){ res.status(500).json({success:false,message:'Gagal memperbarui sesi.'}); }
 });
 
 app.get('/api/me', auth, async (req,res)=>{ res.json({success:true,user:req.user}); });
@@ -1028,6 +1040,19 @@ app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Endpoint 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 async function bootstrap(){
+  // Auth hardening: keep the signing key stable across restarts/deploys when JWT_SECRET is not set.
+  await pool.query(`CREATE TABLE IF NOT EXISTS system_runtime_config (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());`);
+  if (!JWT_SECRET) {
+    const existingSecret = await pool.query(`SELECT value FROM system_runtime_config WHERE key='jwt_secret' LIMIT 1`);
+    if (existingSecret.rows[0]?.value) JWT_SECRET = existingSecret.rows[0].value;
+    else {
+      JWT_SECRET = require('crypto').randomBytes(48).toString('hex');
+      await pool.query(`INSERT INTO system_runtime_config(key,value) VALUES('jwt_secret',$1) ON CONFLICT(key) DO NOTHING`, [JWT_SECRET]);
+      const confirmed = await pool.query(`SELECT value FROM system_runtime_config WHERE key='jwt_secret' LIMIT 1`);
+      JWT_SECRET = confirmed.rows[0]?.value || JWT_SECRET;
+    }
+  }
+  if (!JWT_SECRET) JWT_SECRET = FALLBACK_JWT_SECRET;
   await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', requested_role text, permissions jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
   await pool.query(`CREATE TABLE IF NOT EXISTS user_profiles (user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, name text, username text, email text, phone text, store_name text, avatar_data text, updated_at timestamptz NOT NULL DEFAULT now());`);
   try { await pool.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS store_name text;`); } catch(e) {}

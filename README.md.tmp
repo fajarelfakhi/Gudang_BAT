@@ -1,4 +1,4 @@
-# GUDANG BAT — Tahap 18A.1 — Self-Hosted Foundation + Auth Stability
+# GUDANG BAT — Tahap 18A
 
 Tahap 18A mengubah fondasi GUDANG BAT agar **portable dan siap self-hosted**. Railway tidak lagi menjadi bagian wajib dari arsitektur aplikasi.
 
@@ -41,14 +41,3 @@ Urutan berikutnya:
 - Tahap 18B: migrasi server/domain dari Railway ke server self-hosted.
 - Tahap 19: memindahkan transaksi utama secara bertahap dari `app_state` ke tabel normalized core.
 - Setelah Tahap 19 stabil, `app_state` dapat dihentikan secara bertahap.
-
-
-## Perbaikan Tahap 18A.1
-- Kunci JWT sekarang stabil antar restart/deploy jika `JWT_SECRET` belum diisi, menggunakan tabel `system_runtime_config`.
-- Masa berlaku token default menjadi 7 hari (dapat diubah dengan `JWT_EXPIRES_IN`).
-- Endpoint `/api/session/refresh` untuk memperbarui sesi tanpa mengulang login selama token saat ini masih valid.
-- Frontend otomatis mencoba refresh sekali ketika API mengembalikan 401, lalu meminta login kembali bila benar-benar tidak valid.
-- Setelah menambah gudang, frontend hanya memuat ulang daftar gudang; tidak melakukan sinkronisasi state penuh yang tidak diperlukan.
-
-### Catatan produksi
-Tetap disarankan mengisi `JWT_SECRET` dengan rahasia panjang dan acak di environment server. Mekanisme `system_runtime_config` berfungsi sebagai pengaman agar sesi tidak berubah hanya karena restart ketika environment variable belum diset.
