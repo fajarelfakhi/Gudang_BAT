@@ -32,7 +32,12 @@ function requireAnyPermission(...permissions) {
 }
 
 async function writeSecurityLog(userId, action, detail, req) {
-  try { await pool.query(`INSERT INTO security_logs(user_id,action,detail,ip,user_agent) VALUES($1,$2,$3,$4,$5)`,[userId||null,String(action),String(detail||''),String(req.ip||''),String(req.get('user-agent')||'').slice(0,500)]); } catch(e) {}
+  try {
+    const values=[userId||null,String(action),String(detail||''),String(req.ip||''),String(req.get('user-agent')||'').slice(0,500)];
+    await pool.query(`INSERT INTO security_logs(user_id,action,detail,ip,user_agent) VALUES($1,$2,$3,$4,$5)`,values);
+    // Normalized audit trail for the self-hosted core. This intentionally mirrors, not replaces, security_logs.
+    try { await pool.query(`INSERT INTO audit_logs_core(user_id,action,detail,ip,user_agent) VALUES($1,$2,$3,$4,$5)`,values); } catch(e) {}
+  } catch(e) {}
 }
 
 function normalizeRole(role){
@@ -132,6 +137,82 @@ function newlyIntroducedIntegrityIssues(before, after) {
   return stateIntegrityIssues(after).filter(x=>!beforeSet.has(x));
 }
 
+
+async function ensureCoreSchema(client) {
+  await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (version integer PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now());`);
+  await client.query(`CREATE TABLE IF NOT EXISTS warehouses (id text PRIMARY KEY, code text UNIQUE NOT NULL, name text NOT NULL, address text NOT NULL DEFAULT '', manager text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'active', is_default boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  await client.query(`CREATE TABLE IF NOT EXISTS user_warehouses (user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE, warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(user_id, warehouse_id));`);
+  await client.query(`CREATE TABLE IF NOT EXISTS product_catalog (id text PRIMARY KEY, category_id text, name text NOT NULL, sku text UNIQUE NOT NULL, description text NOT NULL DEFAULT '', unit text NOT NULL DEFAULT 'Unit', warehouse_location text NOT NULL DEFAULT '', min_stock numeric NOT NULL DEFAULT 10, image_url text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'active', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  await client.query(`CREATE TABLE IF NOT EXISTS product_variants (id text PRIMARY KEY, product_id text NOT NULL REFERENCES product_catalog(id) ON DELETE CASCADE, name text NOT NULL, sku text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(product_id, sku));`);
+  await client.query(`CREATE TABLE IF NOT EXISTS inventory_core (id text PRIMARY KEY, warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE, product_id text NOT NULL REFERENCES product_catalog(id) ON DELETE CASCADE, variant_id text NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE, physical_stock numeric NOT NULL DEFAULT 0, booked_stock numeric NOT NULL DEFAULT 0, process_stock numeric NOT NULL DEFAULT 0, sold_stock numeric NOT NULL DEFAULT 0, damaged_stock numeric NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(warehouse_id, product_id, variant_id));`);
+  await client.query(`CREATE TABLE IF NOT EXISTS stock_movements_core (id text PRIMARY KEY, warehouse_id text REFERENCES warehouses(id) ON DELETE SET NULL, type text NOT NULL, product_id text, variant_id text, qty numeric NOT NULL DEFAULT 0, before_qty numeric, after_qty numeric, reference_id text, reference_no text, user_id text, note text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());`);
+  await client.query(`CREATE TABLE IF NOT EXISTS audit_logs_core (id bigserial PRIMARY KEY, user_id text, action text NOT NULL, detail text NOT NULL DEFAULT '', ip text, user_agent text, created_at timestamptz NOT NULL DEFAULT now());`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_core_warehouse ON inventory_core(warehouse_id);`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_core_warehouse_created ON stock_movements_core(warehouse_id, created_at DESC);`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_user_warehouses_user ON user_warehouses(user_id);`);
+}
+
+async function syncCoreFromState(client, state) {
+  await ensureCoreSchema(client);
+  const locations = Array.isArray(state?.locations) ? state.locations : [];
+  for (const w of locations) {
+    await client.query(`INSERT INTO warehouses(id,code,name,address,manager,status,is_default,created_at,updated_at)
+      VALUES($1,$1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz,now()),now())
+      ON CONFLICT(id) DO UPDATE SET code=EXCLUDED.code,name=EXCLUDED.name,address=EXCLUDED.address,manager=EXCLUDED.manager,status=EXCLUDED.status,is_default=EXCLUDED.is_default,updated_at=now()`,
+      [w.id,w.name||w.id,w.address||'',w.manager||'',w.status||'active',!!w.isDefault,w.createdAt||null]);
+  }
+  if (locations.length) await client.query(`DELETE FROM warehouses WHERE id <> ALL($1::text[])`, [locations.map(x=>String(x.id))]);
+
+  const userLocations = state?.userLocations || {};
+  await client.query('DELETE FROM user_warehouses');
+  for (const [userId, ids] of Object.entries(userLocations)) {
+    for (const warehouseId of (Array.isArray(ids) ? ids : [])) {
+      await client.query(`INSERT INTO user_warehouses(user_id,warehouse_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[userId,warehouseId]);
+    }
+  }
+
+  const categories = Array.isArray(state?.categories) ? state.categories : [];
+  const categoryIds = new Set(categories.map(c=>String(c.id)));
+  const products = Array.isArray(state?.products) ? state.products : [];
+  for (const p of products) {
+    await client.query(`INSERT INTO product_catalog(id,category_id,name,sku,description,unit,warehouse_location,min_stock,image_url,status,created_at,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11::timestamptz,now()),now())
+      ON CONFLICT(id) DO UPDATE SET category_id=EXCLUDED.category_id,name=EXCLUDED.name,sku=EXCLUDED.sku,description=EXCLUDED.description,unit=EXCLUDED.unit,warehouse_location=EXCLUDED.warehouse_location,min_stock=EXCLUDED.min_stock,image_url=EXCLUDED.image_url,status=EXCLUDED.status,updated_at=now()`,
+      [p.id,categoryIds.has(String(p.categoryId))?p.categoryId:null,p.name||p.id,p.sku||p.id,p.description||'',p.unit||'Unit',p.warehouseLocation||'',Number(p.minStock||10),p.imageUrl||'',p.status||'active',p.createdAt||null]);
+    for (const v of (Array.isArray(p.variants)?p.variants:[])) {
+      await client.query(`INSERT INTO product_variants(id,product_id,name,sku,created_at,updated_at)
+        VALUES($1,$2,$3,$4,now(),now()) ON CONFLICT(id) DO UPDATE SET product_id=EXCLUDED.product_id,name=EXCLUDED.name,sku=EXCLUDED.sku,updated_at=now()`,
+        [v.id,p.id,v.name||v.id,v.sku||`${p.sku||p.id}-${v.id}`]);
+    }
+  }
+  if (products.length) await client.query(`DELETE FROM product_catalog WHERE id <> ALL($1::text[])`, [products.map(x=>String(x.id))]);
+
+  const inventory = Array.isArray(state?.inventory) ? state.inventory : [];
+  const validInventoryIds=[];
+  for (const i of inventory) {
+    const warehouseId=String(i.locationId||locations.find(x=>x.isDefault)?.id||locations[0]?.id||'GUD-01');
+    const id=String(i.id||`INV-${warehouseId}-${i.productId}-${i.variantId}`);
+    validInventoryIds.push(id);
+    await client.query(`INSERT INTO inventory_core(id,warehouse_id,product_id,variant_id,physical_stock,booked_stock,process_stock,sold_stock,damaged_stock,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+      ON CONFLICT(id) DO UPDATE SET warehouse_id=EXCLUDED.warehouse_id,product_id=EXCLUDED.product_id,variant_id=EXCLUDED.variant_id,physical_stock=EXCLUDED.physical_stock,booked_stock=EXCLUDED.booked_stock,process_stock=EXCLUDED.process_stock,sold_stock=EXCLUDED.sold_stock,damaged_stock=EXCLUDED.damaged_stock,updated_at=now()`,
+      [id,warehouseId,i.productId,i.variantId,Number(i.physicalStock||0),Number(i.bookedStock||0),Number(i.processStock||0),Number(i.soldStock||0),Number(i.damagedStock||0)]);
+  }
+  if (validInventoryIds.length) await client.query(`DELETE FROM inventory_core WHERE id <> ALL($1::text[])`,[validInventoryIds]);
+  else await client.query('DELETE FROM inventory_core');
+
+  const movements = Array.isArray(state?.stockMutations) ? state.stockMutations : [];
+  // The JSON state remains the historical source of truth for now. Core movements are refreshed
+  // idempotently so the normalized layer can become the primary transaction store in a later stage.
+  for (const m of movements) {
+    const warehouseId=m.locationId || null;
+    await client.query(`INSERT INTO stock_movements_core(id,warehouse_id,type,product_id,variant_id,qty,before_qty,after_qty,reference_id,reference_no,user_id,note,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13::timestamptz,now()))
+      ON CONFLICT(id) DO NOTHING`,
+      [m.id,warehouseId,m.type||'UNKNOWN',m.productId||null,m.variantId||null,Number(m.qty||0),m.before==null?null:Number(m.before),m.after==null?null:Number(m.after),m.referenceId||null,m.referenceNo||null,m.userId||null,m.note||'',m.createdAt||null]);
+  }
+}
+
 async function mutateState(mutator) {
   const client = await pool.connect();
   try {
@@ -146,6 +227,7 @@ async function mutateState(mutator) {
       throw Object.assign(new Error(`Perubahan dibatalkan demi menjaga konsistensi data: ${integrityIssues.join('; ')}`), {status:409, code:'STATE_INTEGRITY'});
     }
     await createStateSnapshot(client, previousState, previousVersion, 'MUTATION', null);
+    await syncCoreFromState(client, state);
     const saved = await client.query('UPDATE app_state SET state=$1::jsonb, version=version+1, updated_at=NOW() WHERE id=1 RETURNING version', [JSON.stringify(state)]);
     await client.query('COMMIT');
     return { result, version:Number(saved.rows[0].version) };
@@ -857,6 +939,7 @@ app.post('/api/state', auth, async (req,res)=>{
     await createStateSnapshot(client, dbState, version, 'STATE_SAVE', req.user?.id||null);
     await syncUsers(client, incoming.users || []);
     const {users, ...state} = incoming;
+    await syncCoreFromState(client, state);
     const saved=await client.query('UPDATE app_state SET state=$1::jsonb, version=version+1, updated_at=NOW() WHERE id=1 RETURNING version',[JSON.stringify(state)]);
     await client.query('COMMIT');
     res.json({success:true, message:'Data berhasil disimpan.', version:Number(saved.rows[0].version)});
@@ -914,6 +997,33 @@ app.get('/api/public/settings', async (req,res)=>{
   } catch(e){res.status(500).json({success:false,message:'Gagal memuat identitas perusahaan.'});}
 });
 
+
+app.get('/api/admin/core-status', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const q=async(sql)=>Number((await pool.query(sql)).rows[0].count||0);
+    const [warehouses,users,products,variants,inventory,movements,snapshots]=await Promise.all([
+      q('SELECT count(*) FROM warehouses'),q('SELECT count(*) FROM users'),q('SELECT count(*) FROM product_catalog'),q('SELECT count(*) FROM product_variants'),q('SELECT count(*) FROM inventory_core'),q('SELECT count(*) FROM stock_movements_core'),q('SELECT count(*) FROM app_state_snapshots')
+    ]);
+    res.json({success:true,data:{warehouses,users,products,variants,inventory,movements,snapshots,mode:'dual-layer',sourceOfTruth:'app_state',normalizedLayer:'core PostgreSQL',checkedAt:new Date().toISOString()}});
+  } catch(e){res.status(500).json({success:false,message:'Gagal memeriksa fondasi database.'});}
+});
+
+app.post('/api/admin/core-sync', auth, requireRole('admin'), async (req,res)=>{
+  try { const {state,version}=await getState(pool); await syncCoreFromState(pool,state); await pool.query(`INSERT INTO schema_migrations(version,name) VALUES(18,'self_hosted_core_foundation') ON CONFLICT(version) DO NOTHING`); res.json({success:true,message:'Lapisan database inti berhasil disinkronkan.',version}); }
+  catch(e){res.status(500).json({success:false,message:'Gagal sinkronisasi database inti.'});}
+});
+
+app.get('/api/admin/backup', auth, requireRole('admin'), async (req,res)=>{
+  try {
+    const {state,version}=await getState(pool);
+    const payload={format:'GUDANG-BAT-BACKUP',backupVersion:1,createdAt:new Date().toISOString(),appVersion:require('./package.json').version,stateVersion:version,state};
+    const filename=`gudang-bat-backup-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    res.setHeader('Content-Type','application/json; charset=utf-8');
+    res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);
+    res.send(JSON.stringify(payload,null,2));
+  } catch(e){res.status(500).json({success:false,message:'Gagal membuat backup data.'});}
+});
+
 app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Endpoint API tidak ditemukan.'}));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
@@ -928,6 +1038,7 @@ async function bootstrap(){
   try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text NOT NULL DEFAULT '';`); } catch(e){}
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state (id integer PRIMARY KEY CHECK(id=1), state jsonb NOT NULL DEFAULT '{}'::jsonb, version bigint NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now());`);
   await pool.query(`CREATE TABLE IF NOT EXISTS app_state_snapshots (id bigserial PRIMARY KEY, state jsonb NOT NULL, source_version bigint NOT NULL, reason text NOT NULL, user_id text NULL, created_at timestamptz NOT NULL DEFAULT now());`);
+  await ensureCoreSchema(pool);
   const exists=await pool.query('SELECT 1 FROM app_state WHERE id=1');
   if(!exists.rowCount){
     const seed=JSON.parse(fs.readFileSync(path.join(__dirname,'database','seed.json'),'utf8'));
@@ -939,6 +1050,9 @@ async function bootstrap(){
   } else {
     const r=await pool.query('SELECT state FROM app_state WHERE id=1'); const st=r.rows[0]?.state||{}; let changed=false; if(!Array.isArray(st.locations)||!st.locations.length){st.locations=[{id:'GUD-01',name:st.settings?.warehouseName||'Gudang Utama',address:'',manager:'',status:'active',isDefault:true,createdAt:new Date().toISOString()}];changed=true;} if(!st.userLocations){st.userLocations={}; changed=true;} for(const key of ['inventory','stockIns','stockOuts','workReports','payoutRequests','sellerBookings','shippingResi','scannedResi','salesClosings','damagedGoods','returnedGoods','stockMutations','activityLogs']) if(Array.isArray(st[key])) st[key].forEach(x=>{if(x&&!x.locationId){x.locationId='GUD-01';changed=true;}}); if(changed) await pool.query('UPDATE app_state SET state=$1::jsonb,version=version+1,updated_at=NOW() WHERE id=1',[JSON.stringify(st)]);
   }
+  const bootState=(await pool.query('SELECT state FROM app_state WHERE id=1')).rows[0]?.state || {};
+  await syncCoreFromState(pool, bootState);
+  await pool.query(`INSERT INTO schema_migrations(version,name) VALUES(18,'self_hosted_core_foundation') ON CONFLICT(version) DO NOTHING`);
   app.listen(PORT,'0.0.0.0',()=>console.log(`GUDANG BAT online server berjalan di port ${PORT}`));
 }
 bootstrap().catch(e=>{console.error('Gagal bootstrap:',e);process.exit(1)});
