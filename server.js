@@ -43,6 +43,9 @@ function normalizeRole(role){
   return r || 'seller';
 }
 function publicUser(u) { return { id:u.id, username:u.username, name:u.name, role:normalizeRole(u.role), email:u.email || '', phone:u.phone || '', status:u.status, requestedRole:u.requested_role || u.requestedRole || '', permissions:Array.isArray(u.permissions)?u.permissions:(u.permissions||[]), avatarData:u.avatar_data || u.avatarData || '' }; }
+function getActiveLocationId(req, state) { const locations=Array.isArray(state?.locations)?state.locations:[]; const requested=String(req.headers['x-location-id']||'').trim(); const fallback=locations.find(x=>x.isDefault)?.id || locations[0]?.id || 'GUD-01'; if(!requested || requested==='ALL') return req.user?.role==='admin' ? 'ALL' : fallback; if(locations.some(x=>x.id===requested && x.status!=='inactive')) return requested; return fallback; }
+function userAllowedLocation(state, req, locationId) { if(req.user?.role==='admin') return true; const map=state?.userLocations||{}; const assigned=Array.isArray(map[req.user.id])?map[req.user.id]:[]; return assigned.length===0 || assigned.includes(locationId); }
+function stampLocation(item, locationId){ if(item && !item.locationId) item.locationId=locationId; return item; }
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: ['*'],
   gudang: ['dashboard.view','stocks.view','inventory.qc','work.reports','wages.manage'],
@@ -357,9 +360,9 @@ app.get('/api/me', auth, async (req,res)=>{ res.json({success:true,user:req.user
 // menimpa app_state global yang dipakai bersama antar perangkat.
 app.get('/api/me/profile', auth, async (req,res)=>{
   try {
-    const r=await pool.query('SELECT user_id,name,username,email,phone,avatar_data,updated_at FROM user_profiles WHERE user_id=$1',[req.user.id]);
+    const r=await pool.query('SELECT user_id,name,username,email,phone,store_name,avatar_data,updated_at FROM user_profiles WHERE user_id=$1',[req.user.id]);
     const row=r.rows[0];
-    res.json({success:true,data:row?{userId:row.user_id,name:row.name||req.user.name,username:row.username||req.user.username,email:row.email||req.user.email||'',phone:row.phone||req.user.phone||'',avatarData:row.avatar_data||'',updatedAt:row.updated_at}: {userId:req.user.id,name:req.user.name,username:req.user.username,email:req.user.email||'',phone:req.user.phone||'',avatarData:''}});
+    res.json({success:true,data:row?{userId:row.user_id,name:row.name||req.user.name,username:row.username||req.user.username,email:row.email||req.user.email||'',phone:row.phone||req.user.phone||'',storeName:row.store_name||'',avatarData:row.avatar_data||'',updatedAt:row.updated_at}: {userId:req.user.id,name:req.user.name,username:req.user.username,email:req.user.email||'',phone:req.user.phone||'',avatarData:''}});
   } catch(e){ console.error('GET profile',e); res.status(500).json({success:false,message:'Gagal memuat profil pengguna.'}); }
 });
 app.patch('/api/me/profile', auth, async (req,res)=>{
@@ -369,6 +372,7 @@ app.patch('/api/me/profile', auth, async (req,res)=>{
     const username=body.username!==undefined?String(body.username).trim().toLowerCase():req.user.username;
     const email=body.email!==undefined?String(body.email).trim():req.user.email||'';
     const phone=body.phone!==undefined?String(body.phone).trim():req.user.phone||'';
+    const storeName=body.storeName!==undefined?String(body.storeName).trim():'';
     const avatarData=body.avatarData!==undefined?String(body.avatarData):null;
     if(!name||!username) return res.status(400).json({success:false,message:'Nama dan username wajib diisi.'});
     const dup=await pool.query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND id<>$2 LIMIT 1',[username,req.user.id]);
@@ -378,12 +382,12 @@ app.patch('/api/me/profile', auth, async (req,res)=>{
       await client.query('BEGIN');
       await client.query('UPDATE users SET name=$1,username=$2,email=$3,phone=$4,updated_at=NOW() WHERE id=$5',[name,username,email||null,phone||null,req.user.id]);
       if(avatarData!==null && avatarData.length>2_800_000) throw Object.assign(new Error('Foto profil terlalu besar. Maksimal sekitar 2 MB.'),{status:400});
-      await client.query(`INSERT INTO user_profiles(user_id,name,username,email,phone,avatar_data,updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT(user_id) DO UPDATE SET name=EXCLUDED.name,username=EXCLUDED.username,email=EXCLUDED.email,phone=EXCLUDED.phone,avatar_data=CASE WHEN $6 IS NULL THEN user_profiles.avatar_data ELSE EXCLUDED.avatar_data END,updated_at=NOW()`,[req.user.id,name,username,email||'',phone||'',avatarData]);
+      await client.query(`INSERT INTO user_profiles(user_id,name,username,email,phone,store_name,avatar_data,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NOW()) ON CONFLICT(user_id) DO UPDATE SET name=EXCLUDED.name,username=EXCLUDED.username,email=EXCLUDED.email,phone=EXCLUDED.phone,store_name=EXCLUDED.store_name,avatar_data=CASE WHEN $7 IS NULL THEN user_profiles.avatar_data ELSE EXCLUDED.avatar_data END,updated_at=NOW()`,[req.user.id,name,username,email||'',phone||'',storeName,avatarData]);
       await client.query('COMMIT');
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release()}
     const r=await pool.query('SELECT id,username,name,role,email,phone,status,permissions FROM users WHERE id=$1',[req.user.id]);
     const u=publicUser(r.rows[0]);
-    res.json({success:true,message:'Profil berhasil diperbarui.',user:u,data:{name,username,email,phone,avatarData:avatarData===null?undefined:avatarData}});
+    res.json({success:true,message:'Profil berhasil diperbarui.',user:u,data:{name,username,email,phone,storeName,avatarData:avatarData===null?undefined:avatarData}});
   }catch(e){ console.error('PATCH profile',e); res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui profil pengguna.'}); }
 });
 app.get('/api/me/permissions', auth, async (req,res)=>{ res.json({success:true,data:{role:req.user.role,permissions:req.user.permissions||[]}}); });
@@ -426,12 +430,14 @@ app.get('/api/dashboard/summary', auth, requirePermission('dashboard.view'), asy
     const start=req.query.start ? new Date(req.query.start) : null;
     const end=req.query.end ? new Date(req.query.end+'T23:59:59.999Z') : null;
     const inRange=(d)=>{ if(!d) return true; const t=new Date(d); return (!start||t>=start)&&(!end||t<=end); };
-    const inv=state.inventory||[];
-    const movements=(state.inventoryMovements||[]).filter(x=>inRange(x.createdAt));
-    const reports=(state.workReports||[]).filter(x=>inRange(x.createdAt||x.date));
-    const closings=(state.salesClosings||[]).filter(x=>inRange(x.closedAt||x.createdAt));
-    const returns=(state.returnedGoods||[]).filter(x=>inRange(x.createdAt));
-    const defects=(state.damagedGoods||[]).filter(x=>inRange(x.createdAt));
+    const activeLocation=getActiveLocationId(req,state);
+    const inLocation=(x)=>activeLocation==='ALL' || String(x?.locationId||'GUD-01')===activeLocation;
+    const inv=(state.inventory||[]).filter(inLocation);
+    const movements=(state.inventoryMovements||[]).filter(x=>inLocation(x)&&inRange(x.createdAt));
+    const reports=(state.workReports||[]).filter(x=>inLocation(x)&&inRange(x.createdAt||x.date));
+    const closings=(state.salesClosings||[]).filter(x=>inLocation(x)&&inRange(x.closedAt||x.createdAt));
+    const returns=(state.returnedGoods||[]).filter(x=>inLocation(x)&&inRange(x.createdAt));
+    const defects=(state.damagedGoods||[]).filter(x=>inLocation(x)&&inRange(x.createdAt));
     const sum=(arr,key)=>arr.reduce((n,x)=>n+Number(x[key]||0),0);
     const summary={
       totalPhysicalStock:sum(inv,'physicalStock'), totalBookedStock:sum(inv,'bookedStock'),
@@ -443,8 +449,8 @@ app.get('/api/dashboard/summary', auth, requirePermission('dashboard.view'), asy
       soldInPeriod:closings.reduce((n,x)=>n+Number(x.qty||0),0),
       returnsInPeriod:sum(returns,'qty'), defectsInPeriod:sum(defects,'qty'),
       workWage:reports.reduce((n,x)=>n+Number(x.totalWage||0),0),
-      pendingBookings:(state.sellerBookings||[]).filter(x=>['Menunggu Persetujuan','Aktif'].includes(x.status)).length,
-      pendingPayouts:(state.payoutRequests||[]).filter(x=>x.status==='Menunggu Persetujuan').length,
+      pendingBookings:(state.sellerBookings||[]).filter(x=>inLocation(x)&&['Menunggu Persetujuan','Aktif'].includes(x.status)).length,
+      pendingPayouts:(state.payoutRequests||[]).filter(x=>inLocation(x)&&x.status==='Menunggu Persetujuan').length,
       scannedResi:(state.scannedResi||[]).length, closings:closings.length
     };
     res.json({success:true,data:summary,version});
@@ -493,7 +499,7 @@ app.post('/api/products', auth, requirePermission('products.manage'), async (req
     if(!state.categories.some(c=>c.id===categoryId))throw Object.assign(new Error('Kategori tidak ditemukan.'),{status:400});
     if(state.products.some(p=>String(p.sku).toLowerCase()===sku.toLowerCase()))throw Object.assign(new Error('SKU produk sudah digunakan.'),{status:409});
     const now=new Date().toISOString(); const id='PRD-'+Date.now(); const variants=(Array.isArray(payload.variants)&&payload.variants.length?payload.variants:[{name:'Standard'}]).map((v,i)=>({id:v.id||'VAR-'+Date.now()+'-'+i,name:String(v.name||'Standard').trim(),sku:v.sku||`${sku}-${i+1}`}));
-    const product={id,categoryId,name,sku,description:String(payload.description||''),unit:String(payload.unit||'Unit'),warehouseLocation:String(payload.warehouseLocation||'Rak Gudang Utama'),minStock:Number(payload.minStock||10),status:'active',imageUrl:String(payload.imageUrl||''),variants,createdAt:now,updatedAt:now}; state.products.push(product); variants.forEach(v=>{if(!state.inventory.some(i=>i.productId===id&&i.variantId===v.id))state.inventory.push({productId:id,variantId:v.id,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0});}); return product;
+    const product={id,categoryId,name,sku,description:String(payload.description||''),unit:String(payload.unit||'Unit'),warehouseLocation:String(payload.warehouseLocation||'Rak Gudang Utama'),minStock:Number(payload.minStock||10),status:'active',imageUrl:String(payload.imageUrl||''),variants,createdAt:now,updatedAt:now}; state.products.push(product); variants.forEach(v=>{if(!state.inventory.some(i=>i.productId===id&&i.variantId===v.id))state.inventory.push({id:'INV-'+Date.now()+'-'+Math.floor(Math.random()*10000),productId:id,variantId:v.id,locationId:getActiveLocationId(req,state),physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0});}); return product;
   }); res.status(201).json({success:true,message:'Produk berhasil ditambahkan.',data:result,version}); }
   catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah produk.'});}
 });
@@ -515,11 +521,11 @@ app.delete('/api/products/:id', auth, requirePermission('products.manage'), asyn
 // INVENTORY CRUD / MUTATION API
 // Tahap 3: setiap transaksi stok diproses atomik di backend.
 // ============================================================================
-function makeInventoryRecord(state, productId, variantId) {
+function makeInventoryRecord(state, productId, variantId, locationId='GUD-01') {
   state.inventory = state.inventory || [];
-  let inv = state.inventory.find(i => i.productId === productId && i.variantId === variantId);
+  let inv = state.inventory.find(i => i.productId === productId && i.variantId === variantId && (i.locationId||'GUD-01') === locationId);
   if (!inv) {
-    inv = { productId, variantId, physicalStock: 0, bookedStock: 0, processStock: 0, soldStock: 0, damagedStock: 0 };
+    inv = { id:'INV-'+Date.now()+'-'+Math.floor(Math.random()*10000), productId, variantId, locationId, physicalStock: 0, bookedStock: 0, processStock: 0, soldStock: 0, damagedStock: 0 };
     state.inventory.push(inv);
   }
   ['physicalStock','bookedStock','processStock','soldStock','damagedStock'].forEach(k => inv[k] = Number(inv[k] || 0));
@@ -575,7 +581,7 @@ app.post('/api/inventory/in', auth, requirePermission('inventory.in_out'), async
       const qty=Number(payload.qty||0);
       if(!productId||!variantId||!Number.isFinite(qty)||qty<=0) throw Object.assign(new Error('Produk, varian, dan jumlah barang masuk wajib valid.'),{status:400});
       const {product,variant}=requireProductVariant(state,productId,variantId);
-      const inv=makeInventoryRecord(state,productId,variantId);
+      const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,productId,variantId,locationId);
       inv.physicalStock += qty;
       state.stockIns=state.stockIns||[];
       const now=new Date().toISOString();
@@ -596,12 +602,12 @@ app.post('/api/inventory/out', auth, requirePermission('inventory.in_out'), asyn
       const productId=String(payload.productId||''),variantId=String(payload.variantId||''),qty=Number(payload.qty||0);
       if(!productId||!variantId||!Number.isFinite(qty)||qty<=0) throw Object.assign(new Error('Produk, varian, dan jumlah barang keluar wajib valid.'),{status:400});
       const {product,variant}=requireProductVariant(state,productId,variantId);
-      const inv=makeInventoryRecord(state,productId,variantId);
+      const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,productId,variantId,locationId);
       const available=Math.max(0,inv.physicalStock-inv.bookedStock);
       if(qty>available) throw Object.assign(new Error(`Stok tersedia tidak mencukupi. Tersedia ${available} ${product.unit}.`),{status:409});
       const before=inv.physicalStock; inv.physicalStock-=qty;
       state.stockOuts=state.stockOuts||[]; const now=new Date().toISOString();
-      const item={id:'STO-'+Date.now(),docNo:String(payload.docNo||('OUT-'+Date.now())),destination:String(payload.destination||'Tujuan Khusus'),reason:String(payload.reason||'Pengeluaran Khusus'),date:now.slice(0,10),productId,variantId,qty,note:String(payload.note||''),userId:req.user.id,createdAt:now};
+      const item={id:'STO-'+Date.now(),docNo:String(payload.docNo||('OUT-'+Date.now())),destination:String(payload.destination||'Tujuan Khusus'),reason:String(payload.reason||'Pengeluaran Khusus'),date:now.slice(0,10),productId,variantId,qty,note:String(payload.note||''),userId:req.user.id,locationId,createdAt:now};
       state.stockOuts.unshift(item);
       addStockMutation(state,{type:'KELUAR',productId,variantId,qty,before,after:inv.physicalStock,referenceId:item.id,referenceNo:item.docNo,userId:req.user.id,note:item.note});
       addInventoryActivity(state,req,'BARANG_KELUAR',`Barang keluar ${product.name} - ${variant.name}: ${qty} ${product.unit}.`,{referenceId:item.id});
@@ -617,7 +623,7 @@ app.post('/api/inventory/qc', auth, requirePermission('inventory.qc'), async (re
     const {result,version}=await mutateState((state)=>{
       const productId=String(payload.productId||''),variantId=String(payload.variantId||''),passQty=Number(payload.passQty||0),defectQty=Number(payload.defectQty||0);
       if(!productId||!variantId||passQty<0||defectQty<0||(passQty+defectQty)<=0) throw Object.assign(new Error('Data QC tidak valid.'),{status:400});
-      const {product,variant}=requireProductVariant(state,productId,variantId); const inv=makeInventoryRecord(state,productId,variantId);
+      const {product,variant}=requireProductVariant(state,productId,variantId); const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,productId,variantId,locationId);
       if(passQty+defectQty>inv.physicalStock) throw Object.assign(new Error('Jumlah QC melebihi stok fisik.'),{status:409});
       inv.processStock += passQty; inv.damagedStock += defectQty;
       if(defectQty){ state.damagedGoods=state.damagedGoods||[]; state.damagedGoods.unshift({id:'DMG-'+Date.now(),productId,variantId,qty:defectQty,reason:String(payload.note||'Hasil pemeriksaan QC'),status:'Tercatat',date:new Date().toISOString().slice(0,10),userId:req.user.id,createdAt:new Date().toISOString()}); }
@@ -634,7 +640,7 @@ app.post('/api/inventory/defect', auth, requirePermission('inventory.qc'), async
     const {result,version}=await mutateState((state)=>{
       const productId=String(payload.productId||''),variantId=String(payload.variantId||''),qty=Number(payload.qty||0);
       if(!productId||!variantId||qty<=0) throw Object.assign(new Error('Data barang cacat tidak valid.'),{status:400});
-      const {product,variant}=requireProductVariant(state,productId,variantId); const inv=makeInventoryRecord(state,productId,variantId);
+      const {product,variant}=requireProductVariant(state,productId,variantId); const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,productId,variantId,locationId);
       const available=Math.max(0,inv.physicalStock-inv.bookedStock);
       if(qty>available) throw Object.assign(new Error('Stok tersedia tidak mencukupi untuk ditandai cacat.'),{status:409});
       inv.physicalStock-=qty; inv.damagedStock+=qty; state.damagedGoods=state.damagedGoods||[];
@@ -652,9 +658,9 @@ app.post('/api/inventory/return', auth, requirePermission('inventory.qc'), async
     const {result,version}=await mutateState((state)=>{
       const productId=String(payload.productId||''),variantId=String(payload.variantId||''),qty=Number(payload.qty||0);
       if(!productId||!variantId||qty<=0) throw Object.assign(new Error('Data retur tidak valid.'),{status:400});
-      const {product,variant}=requireProductVariant(state,productId,variantId); const inv=makeInventoryRecord(state,productId,variantId);
+      const {product,variant}=requireProductVariant(state,productId,variantId); const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,productId,variantId,locationId);
       state.returnedGoods=state.returnedGoods||[]; const now=new Date().toISOString();
-      const item={id:'RET-'+Date.now(),productId,variantId,qty,source:String(payload.source||'Pelanggan'),reason:String(payload.reason||'Retur'),status:String(payload.status||'Menunggu Pemeriksaan'),note:String(payload.note||''),date:now.slice(0,10),userId:req.user.id,createdAt:now};
+      const item={id:'RET-'+Date.now(),productId,variantId,qty,source:String(payload.source||'Pelanggan'),reason:String(payload.reason||'Retur'),status:String(payload.status||'Menunggu Pemeriksaan'),note:String(payload.note||''),date:now.slice(0,10),userId:req.user.id,locationId,createdAt:now};
       state.returnedGoods.unshift(item); addInventoryActivity(state,req,'BARANG_RETUR',`Retur ${product.name} - ${variant.name}: ${qty} ${product.unit}.`,{referenceId:item.id});
       return {transaction:item,inventory:inv};
     });
@@ -674,11 +680,11 @@ app.get('/api/work-types', auth, requireAnyPermission('work.reports','wages.mana
 app.post('/api/work-types', auth, requirePermission('wages.manage'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];if(state.workTypes.some(x=>String(x.name).toLowerCase()===name.toLowerCase()))throw Object.assign(new Error('Jenis pekerjaan sudah ada.'),{status:409});const now=new Date().toISOString();const item={id:'WRK-'+Date.now(),name,defaultRate:rate,description,createdAt:now,updatedAt:now};state.workTypes.push(item);state.activityLogs=state.activityLogs||[];state.activityLogs.unshift({id:'ACT-'+Date.now(),type:'TAMBAH_JENIS_PEKERJAAN',description:`Menambahkan ${name} dengan tarif ${rate}`,userId:req.user.id,createdAt:now});return item;});res.status(201).json({success:true,message:'Jenis pekerjaan berhasil ditambahkan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah jenis pekerjaan.'});}});
 app.put('/api/work-types/:id', auth, requirePermission('wages.manage'), async (req,res)=>{try{const name=String(req.body?.name||'').trim(),rate=Number(req.body?.rate||req.body?.defaultRate||0),description=String(req.body?.description||'').trim();if(!name||rate<=0)return res.status(400).json({success:false,message:'Nama pekerjaan dan tarif wajib diisi.'});const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});Object.assign(item,{name,defaultRate:rate,description,updatedAt:new Date().toISOString()});return item;});res.json({success:true,message:'Jenis pekerjaan berhasil diperbarui.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui jenis pekerjaan.'});}});
 app.delete('/api/work-types/:id', auth, requirePermission('wages.manage'), async (req,res)=>{try{const {result,version}=await mutateState((state)=>{state.workTypes=state.workTypes||[];const item=state.workTypes.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Jenis pekerjaan tidak ditemukan.'),{status:404});state.workTypes=state.workTypes.filter(x=>x.id!==item.id);return item;});res.json({success:true,message:'Jenis pekerjaan berhasil dihapus.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menghapus jenis pekerjaan.'});}});
-app.get('/api/work-reports', auth, async (req,res)=>{try{const {state}=await getState(pool);let data=state.workReports||[];if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat laporan pekerjaan.'});}});
-app.post('/api/work-reports', auth, requirePermission('work.reports'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const wt=(state.workTypes||[]).find(x=>x.id===String(p.workTypeId||''));const product=(state.products||[]).find(x=>x.id===String(p.productId||''));const variant=(product?.variants||[]).find(x=>x.id===String(p.variantId||''));const qty=Number(p.qty||0);if(!wt||!product||!variant||qty<=0)throw Object.assign(new Error('Data laporan pekerjaan tidak lengkap.'),{status:400});const rate=Number(wt.defaultRate||wt.ratePerUnit||0);if(rate<=0)throw Object.assign(new Error('Tarif pekerjaan belum ditentukan.'),{status:409});state.workReports=state.workReports||[];const now=new Date().toISOString();const item={id:'RPT-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),workTypeId:wt.id,workTypeName:wt.name,productId:product.id,productName:product.name,variantId:variant.id,variantName:variant.name,qty,condition:String(p.condition||'Lolos'),note:String(p.note||''),ratePerUnit:rate,totalWage:rate*qty,createdAt:now};state.workReports.unshift(item);return item;});res.status(201).json({success:true,message:'Laporan pekerjaan berhasil disimpan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan laporan pekerjaan.'});}});
-app.get('/api/wages/me', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);res.json({success:true,data:calculateWorkerBalance(state,req.user.id)});}catch(e){res.status(500).json({success:false,message:'Gagal memuat saldo upah.'});}});
-app.get('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);let data=state.payoutRequests||[];if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat pengajuan pencairan.'});}});
-app.post('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const amount=Number(p.amount||0);if(amount<=0||!p.paymentMethod||!p.accountNo)throw Object.assign(new Error('Data pencairan tidak lengkap.'),{status:400});const bal=calculateWorkerBalance(state,req.user.id);if(amount>bal.available)throw Object.assign(new Error(`Nominal melebihi saldo tersedia (${bal.available}).`),{status:409});state.payoutRequests=state.payoutRequests||[];const now=new Date().toISOString();const item={id:'PAY-'+Date.now(),workerId:req.user.id,workerName:String(p.workerName||req.user.username),amount,paymentMethod:String(p.paymentMethod),accountNo:String(p.accountNo),note:String(p.note||''),status:'Menunggu Persetujuan',createdAt:now};state.payoutRequests.unshift(item);return item;});res.status(201).json({success:true,message:'Pengajuan pencairan berhasil dikirim.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mengajukan pencairan.'});}});
+app.get('/api/work-reports', auth, async (req,res)=>{try{const {state}=await getState(pool);const activeLocation=getActiveLocationId(req,state);let data=(state.workReports||[]).filter(x=>activeLocation==='ALL'||String(x.locationId||'GUD-01')===activeLocation);if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat laporan pekerjaan.'});}});
+app.post('/api/work-reports', auth, requirePermission('work.reports'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const wt=(state.workTypes||[]).find(x=>x.id===String(p.workTypeId||''));const product=(state.products||[]).find(x=>x.id===String(p.productId||''));const variant=(product?.variants||[]).find(x=>x.id===String(p.variantId||''));const qty=Number(p.qty||0);if(!wt||!product||!variant||qty<=0)throw Object.assign(new Error('Data laporan pekerjaan tidak lengkap.'),{status:400});const rate=Number(wt.defaultRate||wt.ratePerUnit||0);if(rate<=0)throw Object.assign(new Error('Tarif pekerjaan belum ditentukan.'),{status:409});state.workReports=state.workReports||[];const now=new Date().toISOString();const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId))throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403});const item={id:'RPT-'+Date.now(),locationId,workerId:req.user.id,workerName:String(p.workerName||req.user.username),workTypeId:wt.id,workTypeName:wt.name,productId:product.id,productName:product.name,variantId:variant.id,variantName:variant.name,qty,condition:String(p.condition||'Lolos'),note:String(p.note||''),ratePerUnit:rate,totalWage:rate*qty,createdAt:now};state.workReports.unshift(item);return item;});res.status(201).json({success:true,message:'Laporan pekerjaan berhasil disimpan.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan laporan pekerjaan.'});}});
+app.get('/api/wages/me', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);const activeLocation=getActiveLocationId(req,state);const scoped={...state,workReports:(state.workReports||[]).filter(x=>activeLocation==='ALL'||String(x.locationId||'GUD-01')===activeLocation),payoutRequests:(state.payoutRequests||[]).filter(x=>activeLocation==='ALL'||String(x.locationId||'GUD-01')===activeLocation)};res.json({success:true,data:calculateWorkerBalance(scoped,req.user.id)});}catch(e){res.status(500).json({success:false,message:'Gagal memuat saldo upah.'});}});
+app.get('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const {state}=await getState(pool);const activeLocation=getActiveLocationId(req,state);let data=(state.payoutRequests||[]).filter(x=>activeLocation==='ALL'||String(x.locationId||'GUD-01')===activeLocation);if(req.user.role==='gudang')data=data.filter(x=>x.workerId===req.user.id);res.json({success:true,data});}catch(e){res.status(500).json({success:false,message:'Gagal memuat pengajuan pencairan.'});}});
+app.post('/api/wage-withdrawals', auth, requireAnyPermission('work.reports','wages.manage'), async (req,res)=>{try{const p=req.body||{};const {result,version}=await mutateState((state)=>{const amount=Number(p.amount||0);if(amount<=0||!p.paymentMethod||!p.accountNo)throw Object.assign(new Error('Data pencairan tidak lengkap.'),{status:400});const locationId=getActiveLocationId(req,state);if(!userAllowedLocation(state,req,locationId))throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403});const scoped={...state,workReports:(state.workReports||[]).filter(x=>String(x.locationId||'GUD-01')===locationId),payoutRequests:(state.payoutRequests||[]).filter(x=>String(x.locationId||'GUD-01')===locationId)};const bal=calculateWorkerBalance(scoped,req.user.id);if(amount>bal.available)throw Object.assign(new Error(`Nominal melebihi saldo tersedia (${bal.available}).`),{status:409});state.payoutRequests=state.payoutRequests||[];const now=new Date().toISOString();const item={id:'PAY-'+Date.now(),locationId,workerId:req.user.id,workerName:String(p.workerName||req.user.username),amount,paymentMethod:String(p.paymentMethod),accountNo:String(p.accountNo),note:String(p.note||''),status:'Menunggu Persetujuan',createdAt:now};state.payoutRequests.unshift(item);return item;});res.status(201).json({success:true,message:'Pengajuan pencairan berhasil dikirim.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mengajukan pencairan.'});}});
 async function updateWithdrawal(req,res,status){try{const {result,version}=await mutateState((state)=>{state.payoutRequests=state.payoutRequests||[];const item=state.payoutRequests.find(x=>x.id===req.params.id);if(!item)throw Object.assign(new Error('Pengajuan tidak ditemukan.'),{status:404});if(status==='Disetujui'&&item.status!=='Menunggu Persetujuan')throw Object.assign(new Error('Status pengajuan tidak dapat disetujui.'),{status:409});if(status==='Ditolak'&&item.status!=='Menunggu Persetujuan')throw Object.assign(new Error('Status pengajuan tidak dapat ditolak.'),{status:409});if(status==='Sudah Dibayar'&&item.status!=='Disetujui')throw Object.assign(new Error('Pengajuan harus disetujui terlebih dahulu.'),{status:409});item.status=status;if(status==='Disetujui')item.approvedBy=req.user.username;if(status==='Sudah Dibayar')item.paidAt=new Date().toISOString();if(status==='Ditolak')item.rejectedBy=req.user.username;return item;});res.json({success:true,message:`Pengajuan berhasil ${status.toLowerCase()}.`,data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui pengajuan.'});}}
 app.patch('/api/wage-withdrawals/:id/approve', auth, requireRole('admin'), (req,res)=>updateWithdrawal(req,res,'Disetujui'));
 app.patch('/api/wage-withdrawals/:id/reject', auth, requireRole('admin'), (req,res)=>updateWithdrawal(req,res,'Ditolak'));
@@ -698,24 +704,24 @@ app.post('/api/bookings', auth, requirePermission('seller.booking'), async (req,
     const {result,version}=await mutateState((state)=>{
       const product=(state.products||[]).find(x=>x.id===productId); const variant=(product?.variants||[]).find(x=>x.id===variantId);
       if(!product||!variant)throw Object.assign(new Error('Produk atau varian tidak ditemukan.'),{status:404});
-      state.inventory=state.inventory||[]; let inv=state.inventory.find(x=>x.productId===productId&&x.variantId===variantId);
-      if(!inv){inv={id:'INV-'+Date.now(),productId,variantId,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0};state.inventory.push(inv)}
+      const locationId=getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId))throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); state.inventory=state.inventory||[]; let inv=state.inventory.find(x=>x.productId===productId&&x.variantId===variantId&&(x.locationId||'GUD-01')===locationId);
+      if(!inv){inv={id:'INV-'+Date.now()+'-'+Math.floor(Math.random()*10000),productId,variantId,locationId,physicalStock:0,bookedStock:0,processStock:0,soldStock:0,damagedStock:0};state.inventory.push(inv)}
       const available=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0)); if(qty>available)throw Object.assign(new Error(`Stok tersedia hanya ${available} unit.`),{status:409});
       const now=new Date(), expiryDays=Number(state.settings?.bookingExpiryDays||3), expires=new Date(now.getTime()+expiryDays*86400000);
-      const booking={id:'BKG-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),bookingNo:'BKG-'+now.getTime(),sellerId:req.user.id,sellerName:req.user.name,productId,productName:product.name,variantId,variantName:variant.name,qty,date:now.toISOString().slice(0,10),createdAt:now.toISOString(),expiresAt:expires.toISOString(),status:'Menunggu Persetujuan',note:String(p.note||'')};
+      const booking={locationId,id:'BKG-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),bookingNo:'BKG-'+now.getTime(),sellerId:req.user.id,sellerName:req.user.name,productId,productName:product.name,variantId,variantName:variant.name,qty,date:now.toISOString().slice(0,10),createdAt:now.toISOString(),expiresAt:expires.toISOString(),status:'Menunggu Persetujuan',note:String(p.note||'')};
       inv.bookedStock=Number(inv.bookedStock||0)+qty; state.sellerBookings=state.sellerBookings||[]; state.sellerBookings.unshift(booking); return booking;
     });
     res.status(201).json({success:true,message:'Booking berhasil dibuat dan menunggu persetujuan Admin.',data:result,version});
   }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membuat booking.'});}
 });
 app.patch('/api/bookings/:id/cancel', auth, requirePermission('seller.booking'), async (req,res)=>{
-  try{const {result,version}=await mutateState((state)=>{const b=(state.sellerBookings||[]).find(x=>x.id===req.params.id);if(!b)throw Object.assign(new Error('Booking tidak ditemukan.'),{status:404});if(b.sellerId!==req.user.id)throw Object.assign(new Error('Anda hanya dapat membatalkan booking milik sendiri.'),{status:403});if(!['Menunggu Persetujuan','Aktif'].includes(b.status))throw Object.assign(new Error('Booking ini sudah tidak dapat dibatalkan.'),{status:409});const inv=(state.inventory||[]).find(x=>x.productId===b.productId&&x.variantId===b.variantId);if(inv)inv.bookedStock=Math.max(0,Number(inv.bookedStock||0)-Number(b.qty||0));b.status='Dibatalkan';b.cancelledBy=req.user.username;b.cancelledAt=new Date().toISOString();return b;});res.json({success:true,message:'Booking berhasil dibatalkan dan stok reservasi dilepas.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membatalkan booking.'});}
+  try{const {result,version}=await mutateState((state)=>{const b=(state.sellerBookings||[]).find(x=>x.id===req.params.id);if(!b)throw Object.assign(new Error('Booking tidak ditemukan.'),{status:404});if(b.sellerId!==req.user.id)throw Object.assign(new Error('Anda hanya dapat membatalkan booking milik sendiri.'),{status:403});if(!['Menunggu Persetujuan','Aktif'].includes(b.status))throw Object.assign(new Error('Booking ini sudah tidak dapat dibatalkan.'),{status:409});const inv=(state.inventory||[]).find(x=>x.productId===b.productId&&x.variantId===b.variantId&&(x.locationId||'GUD-01')===(b.locationId||'GUD-01'));if(inv)inv.bookedStock=Math.max(0,Number(inv.bookedStock||0)-Number(b.qty||0));b.status='Dibatalkan';b.cancelledBy=req.user.username;b.cancelledAt=new Date().toISOString();return b;});res.json({success:true,message:'Booking berhasil dibatalkan dan stok reservasi dilepas.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membatalkan booking.'});}
 });
 app.patch('/api/bookings/:id/approve', auth, requireRole('admin'), async (req,res)=>{
   try{const {result,version}=await mutateState((state)=>{const b=(state.sellerBookings||[]).find(x=>x.id===req.params.id);if(!b)throw Object.assign(new Error('Booking tidak ditemukan.'),{status:404});if(b.status!=='Menunggu Persetujuan')throw Object.assign(new Error('Booking tidak lagi menunggu persetujuan.'),{status:409});b.status='Aktif';b.approvedBy=req.user.username;b.approvedAt=new Date().toISOString();return b;});res.json({success:true,message:'Booking seller disetujui.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menyetujui booking.'});}
 });
 app.patch('/api/bookings/:id/reject', auth, requireRole('admin'), async (req,res)=>{
-  try{const {result,version}=await mutateState((state)=>{const b=(state.sellerBookings||[]).find(x=>x.id===req.params.id);if(!b)throw Object.assign(new Error('Booking tidak ditemukan.'),{status:404});if(!['Menunggu Persetujuan','Aktif'].includes(b.status))throw Object.assign(new Error('Booking sudah tidak dapat dibatalkan.'),{status:409});const inv=(state.inventory||[]).find(x=>x.productId===b.productId&&x.variantId===b.variantId);if(inv)inv.bookedStock=Math.max(0,Number(inv.bookedStock||0)-Number(b.qty||0));b.status='Dibatalkan';b.rejectedBy=req.user.username;b.rejectedAt=new Date().toISOString();return b;});res.json({success:true,message:'Booking dibatalkan dan stok reservasi dilepas.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membatalkan booking.'});}
+  try{const {result,version}=await mutateState((state)=>{const b=(state.sellerBookings||[]).find(x=>x.id===req.params.id);if(!b)throw Object.assign(new Error('Booking tidak ditemukan.'),{status:404});if(!['Menunggu Persetujuan','Aktif'].includes(b.status))throw Object.assign(new Error('Booking sudah tidak dapat dibatalkan.'),{status:409});const inv=(state.inventory||[]).find(x=>x.productId===b.productId&&x.variantId===b.variantId&&(x.locationId||'GUD-01')===(b.locationId||'GUD-01'));if(inv)inv.bookedStock=Math.max(0,Number(inv.bookedStock||0)-Number(b.qty||0));b.status='Dibatalkan';b.rejectedBy=req.user.username;b.rejectedAt=new Date().toISOString();return b;});res.json({success:true,message:'Booking dibatalkan dan stok reservasi dilepas.',data:result,version});}catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membatalkan booking.'});}
 });
 
 // Tahap 6: Scan resi dan closing penjualan langsung ke backend.
@@ -731,18 +737,37 @@ app.get('/api/sales-closings', auth, async (req,res)=>{
 app.post('/api/resi/scan', auth, requirePermission('sales.closing'), async (req,res)=>{
   try {
     const resiNo=String(req.body?.resiNo||'').trim();
+    const bookingId=String(req.body?.bookingId||'').trim();
     if(!resiNo) return res.status(400).json({success:false,message:'Nomor resi wajib diisi atau dipindai.'});
     const {result,version}=await mutateState((state)=>{
       state.scannedResi=state.scannedResi||[];
-      const existing=state.scannedResi.find(x=>String(x.resiNo).toLowerCase()===resiNo.toLowerCase());
-      if(existing) return existing;
+      const booking=bookingId ? (state.sellerBookings||[]).find(b=>b.id===bookingId && ['Aktif','Selesai'].includes(b.status)) : null;
+      if(bookingId && !booking) throw Object.assign(new Error('Booking tidak ditemukan atau sudah tidak aktif.'),{status:404});
       const now=new Date().toISOString();
-      const item={id:'SCN-'+Date.now(),resiNo,scannedAt:now,scannedBy:req.user.username,scannedByUserId:req.user.id,status:'Dipindai'};
-      state.scannedResi.unshift(item);
-      addInventoryActivity(state,req,'SCAN_RESI',`Nomor resi ${resiNo} dipindai.`);
+      let item=state.scannedResi.find(x=>String(x.resiNo).toLowerCase()===resiNo.toLowerCase());
+      if(!item){
+        item={id:'SCN-'+Date.now(),resiNo,scannedAt:now,scannedBy:req.user.username,scannedByUserId:req.user.id,status:'Dipindai'};
+        state.scannedResi.unshift(item);
+      }
+      if(booking){
+        item.bookingId=booking.id;
+        item.bookingNo=booking.bookingNo;
+        item.sellerId=booking.sellerId;
+        item.sellerName=booking.sellerName;
+        item.storeName=booking.storeName||booking.sellerName;
+        item.productId=booking.productId;
+        item.productName=booking.productName;
+        item.variantId=booking.variantId;
+        item.variantName=booking.variantName;
+        item.qty=Number(booking.qty||0);
+        item.unit=String((state.products||[]).find(p=>p.id===booking.productId)?.unit||'Unit');
+        item.note=booking.note||'';
+        item.linkedAt=now;
+      }
+      addInventoryActivity(state,req,'SCAN_RESI',booking ? `Resi ${resiNo} dipindai dan dicatat: ${item.storeName} — ${item.productName} (${item.variantName}) ${item.qty} ${item.unit}.` : `Nomor resi ${resiNo} dipindai.`);
       return item;
     });
-    res.status(201).json({success:true,message:'Resi berhasil dipindai.',data:result,version});
+    res.status(201).json({success:true,message:'Resi berhasil dipindai dan data pengiriman dicatat.',data:result,version});
   } catch(e){ res.status(e.status||500).json({success:false,message:e.message||'Gagal menyimpan hasil scan resi.'}); }
 });
 
@@ -761,7 +786,7 @@ app.post('/api/sales-closings', auth, requirePermission('sales.closing'), async 
       const {product,variant}=requireProductVariant(state,String(booking.productId),String(booking.variantId));
       const qty=Number(booking.qty||0);
       if(qty<=0) throw Object.assign(new Error('Jumlah booking tidak valid.'),{status:400});
-      const inv=makeInventoryRecord(state,booking.productId,booking.variantId);
+      const locationId=booking.locationId||getActiveLocationId(req,state); if(!userAllowedLocation(state,req,locationId)) throw Object.assign(new Error('Anda tidak memiliki akses ke gudang ini.'),{status:403}); const inv=makeInventoryRecord(state,booking.productId,booking.variantId,locationId);
       if(inv.bookedStock<qty) throw Object.assign(new Error('Data stok booking tidak konsisten. Closing dibatalkan demi keamanan.'),{status:409});
       if(inv.physicalStock<qty) throw Object.assign(new Error('Stok fisik tidak mencukupi untuk closing.'),{status:409});
       const now=new Date().toISOString();
@@ -773,9 +798,9 @@ app.post('/api/sales-closings', auth, requirePermission('sales.closing'), async 
       booking.status='Selesai'; booking.closedAt=now; booking.closedBy=req.user.username;
       state.scannedResi=state.scannedResi||[];
       let scan=state.scannedResi.find(x=>String(x.resiNo).toLowerCase()===resiNo.toLowerCase());
-      if(!scan){ scan={id:'SCN-'+Date.now(),resiNo,scannedAt:now,scannedBy:req.user.username,scannedByUserId:req.user.id,status:'Dipindai'}; state.scannedResi.unshift(scan); }
-      scan.status='Digunakan Closing'; scan.usedAt=now;
-      const closing={id:'CLS-'+Date.now(),transactionNo,resiNo,sellerId:booking.sellerId,sellerName:booking.sellerName,bookingId:booking.id,bookingNo:booking.bookingNo,productId:booking.productId,productName:product.name,variantId:booking.variantId,variantName:variant.name,qty,closingDate:now.slice(0,10),closedByUserId:req.user.id,closedBy:req.user.username,createdAt:now};
+      if(!scan){ scan={id:'SCN-'+Date.now(),locationId:booking?.locationId||getActiveLocationId(req,state),resiNo,scannedAt:now,scannedBy:req.user.username,scannedByUserId:req.user.id,status:'Dipindai'}; state.scannedResi.unshift(scan); }
+      Object.assign(scan,{bookingId:booking.id,bookingNo:booking.bookingNo,sellerId:booking.sellerId,sellerName:booking.sellerName,storeName:booking.storeName||booking.sellerName,productId:product.id,productName:product.name,variantId:variant.id,variantName:variant.name,qty,unit:product.unit||'Unit',status:'Digunakan Closing',usedAt:now});
+      const closing={id:'CLS-'+Date.now(),locationId,transactionNo,resiNo,sellerId:booking.sellerId,sellerName:booking.sellerName,storeName:booking.storeName||booking.sellerName,bookingId:booking.id,bookingNo:booking.bookingNo,productId:booking.productId,productName:product.name,variantId:booking.variantId,variantName:variant.name,qty,unit:product.unit||'Unit',closingDate:now.slice(0,10),closedByUserId:req.user.id,closedBy:req.user.username,createdAt:now};
       state.salesClosings.unshift(closing);
       addStockMutation(state,{type:'TERJUAL',productId:booking.productId,variantId:booking.variantId,qty,before,after:inv.physicalStock,referenceId:closing.id,referenceNo:transactionNo,userId:req.user.id,note:`Closing penjualan resi ${resiNo}`});
       addInventoryActivity(state,req,'CLOSING_PENJUALAN',`Closing ${transactionNo}: ${product.name} - ${variant.name}, ${qty} ${product.unit}, resi ${resiNo}.`,{referenceId:closing.id});
@@ -784,6 +809,19 @@ app.post('/api/sales-closings', auth, requirePermission('sales.closing'), async 
     res.status(201).json({success:true,message:'Closing penjualan berhasil disimpan dan stok diperbarui.',data:result,version});
   } catch(e){ res.status(e.status||500).json({success:false,message:e.message||'Gagal melakukan closing penjualan.'}); }
 });
+
+// MULTI-GUDANG: satu akun dapat berpindah gudang aktif tanpa logout.
+app.get('/api/locations', auth, async (req,res)=>{ try { const {state}=await getState(pool); let locations=Array.isArray(state.locations)?state.locations:[]; const map=state.userLocations||{}; if(req.user.role!=='admin' && Array.isArray(map[req.user.id]) && map[req.user.id].length) locations=locations.filter(x=>map[req.user.id].includes(x.id)); res.json({success:true,data:locations.filter(x=>x.status!=='inactive'),activeLocationId:getActiveLocationId(req,state)}); } catch(e){res.status(500).json({success:false,message:'Gagal memuat lokasi gudang.'});} });
+app.post('/api/locations', auth, requireRole('admin'), async (req,res)=>{ try { const name=String(req.body?.name||'').trim(), code=String(req.body?.code||'').trim().toUpperCase(); if(!name||!code)return res.status(400).json({success:false,message:'Kode dan nama gudang wajib diisi.'}); const {result,version}=await mutateState(state=>{state.locations=state.locations||[]; if(state.locations.some(x=>x.id===code||String(x.name).toLowerCase()===name.toLowerCase()))throw Object.assign(new Error('Kode atau nama gudang sudah digunakan.'),{status:409}); const item={id:code,name,address:String(req.body?.address||''),manager:String(req.body?.manager||''),status:'active',isDefault:state.locations.length===0,createdAt:new Date().toISOString()}; state.locations.push(item); return item;}); res.status(201).json({success:true,message:'Gudang berhasil ditambahkan.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menambah gudang.'});} });
+
+// TRANSFER ANTAR GUDANG
+app.get('/api/transfers', auth, async (req,res)=>{ try { const {state,version}=await getState(pool); let rows=Array.isArray(state.transfers)?state.transfers:[]; const map=state.userLocations||{}; if(req.user.role!=='admin' && Array.isArray(map[req.user.id]) && map[req.user.id].length){ rows=rows.filter(x=>map[req.user.id].includes(x.fromLocationId)||map[req.user.id].includes(x.toLocationId)); } res.json({success:true,data:rows,version}); }catch(e){res.status(500).json({success:false,message:'Gagal mengambil transfer antar gudang.'});} });
+app.post('/api/transfers', auth, requireRole('admin'), async (req,res)=>{ try { const p=req.body||{}; const from=String(p.fromLocationId||'').trim(), to=String(p.toLocationId||'').trim(), productId=String(p.productId||'').trim(), variantId=String(p.variantId||'').trim(), qty=Number(p.qty||0); if(!from||!to||from===to||!productId||!variantId||!Number.isFinite(qty)||qty<=0) return res.status(400).json({success:false,message:'Gudang asal, tujuan, produk, varian, dan jumlah wajib valid.'}); const {result,version}=await mutateState(state=>{ state.locations=state.locations||[]; if(!state.locations.some(l=>l.id===from&&l.status!=='inactive')||!state.locations.some(l=>l.id===to&&l.status!=='inactive')) throw Object.assign(new Error('Gudang asal/tujuan tidak ditemukan.'),{status:404}); const {product,variant}=requireProductVariant(state,productId,variantId); const inv=makeInventoryRecord(state,productId,variantId,from); const available=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0)-Number(inv.processStock||0)); if(qty>available) throw Object.assign(new Error(`Stok tersedia di gudang asal hanya ${available} ${product.unit||'Unit'}.`),{status:409}); state.transfers=state.transfers||[]; const now=new Date().toISOString(); const item={id:'TRF-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),transferNo:'TRF-'+now.slice(0,10).replace(/-/g,'')+'-'+String(Date.now()).slice(-5),fromLocationId:from,toLocationId:to,productId,productName:product.name,variantId,variantName:variant.name,qty,unit:product.unit||'Unit',status:'Diajukan',note:String(p.note||''),requestedBy:req.user.id,requestedByName:req.user.name||req.user.username,createdAt:now}; state.transfers.unshift(item); return item;}); res.status(201).json({success:true,message:'Transfer stok berhasil diajukan.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membuat transfer.'});} });
+app.patch('/api/transfers/:id/ship', auth, requireRole('admin'), async (req,res)=>{ try { const {result,version}=await mutateState(state=>{ const t=(state.transfers||[]).find(x=>x.id===req.params.id); if(!t)throw Object.assign(new Error('Transfer tidak ditemukan.'),{status:404}); if(t.status!=='Diajukan')throw Object.assign(new Error('Transfer hanya dapat dikirim dari status Diajukan.'),{status:409}); const inv=makeInventoryRecord(state,t.productId,t.variantId,t.fromLocationId); const available=Math.max(0,Number(inv.physicalStock||0)-Number(inv.bookedStock||0)-Number(inv.processStock||0)); if(Number(t.qty)>available)throw Object.assign(new Error(`Stok gudang asal tidak mencukupi. Tersedia ${available} ${t.unit||'Unit'}.`),{status:409}); inv.physicalStock-=Number(t.qty); inv.processStock=Number(inv.processStock||0)+Number(t.qty); t.status='Dikirim'; t.shippedAt=new Date().toISOString(); t.shippedBy=req.user.id; t.shippedByName=req.user.name||req.user.username; addStockMutation(state,{type:'TRANSFER_KELUAR',locationId:t.fromLocationId,productId:t.productId,variantId:t.variantId,qty:Number(t.qty),before:Number(inv.physicalStock)+Number(t.qty),after:Number(inv.physicalStock),referenceId:t.id,referenceNo:t.transferNo,userId:req.user.id,note:`Transfer ke ${t.toLocationId}`}); return t;}); res.json({success:true,message:'Transfer ditandai Dikirim. Stok asal sudah dipindahkan ke proses pengiriman.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal mengirim transfer.'});} });
+app.patch('/api/transfers/:id/receive', auth, requireRole('admin'), async (req,res)=>{ try { const {result,version}=await mutateState(state=>{ const t=(state.transfers||[]).find(x=>x.id===req.params.id); if(!t)throw Object.assign(new Error('Transfer tidak ditemukan.'),{status:404}); if(t.status!=='Dikirim')throw Object.assign(new Error('Transfer harus berstatus Dikirim sebelum diterima.'),{status:409}); const src=makeInventoryRecord(state,t.productId,t.variantId,t.fromLocationId); if(Number(src.processStock||0)<Number(t.qty))throw Object.assign(new Error('Stok proses pengiriman tidak mencukupi untuk diterima.'),{status:409}); src.processStock-=Number(t.qty); const dst=makeInventoryRecord(state,t.productId,t.variantId,t.toLocationId); dst.physicalStock+=Number(t.qty); t.status='Diterima'; t.receivedAt=new Date().toISOString(); t.receivedBy=req.user.id; t.receivedByName=req.user.name||req.user.username; addStockMutation(state,{type:'TRANSFER_MASUK',locationId:t.toLocationId,productId:t.productId,variantId:t.variantId,qty:Number(t.qty),before:Number(dst.physicalStock)-Number(t.qty),after:Number(dst.physicalStock),referenceId:t.id,referenceNo:t.transferNo,userId:req.user.id,note:`Transfer dari ${t.fromLocationId}`}); return t;}); res.json({success:true,message:'Transfer diterima. Stok gudang tujuan sudah bertambah.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal menerima transfer.'});} });
+app.patch('/api/transfers/:id/cancel', auth, requireRole('admin'), async (req,res)=>{ try { const {result,version}=await mutateState(state=>{ const t=(state.transfers||[]).find(x=>x.id===req.params.id); if(!t)throw Object.assign(new Error('Transfer tidak ditemukan.'),{status:404}); if(!['Diajukan'].includes(t.status))throw Object.assign(new Error('Transfer hanya dapat dibatalkan sebelum dikirim.'),{status:409}); t.status='Dibatalkan'; t.cancelledAt=new Date().toISOString(); t.cancelledBy=req.user.id; return t;}); res.json({success:true,message:'Transfer dibatalkan.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal membatalkan transfer.'});} });
+
+app.patch('/api/users/:id/locations', auth, requireRole('admin'), async (req,res)=>{ try { const ids=Array.isArray(req.body?.locationIds)?req.body.locationIds.map(String):[]; const {result,version}=await mutateState(state=>{state.locations=state.locations||[]; if(ids.some(id=>!state.locations.some(l=>l.id===id)))throw Object.assign(new Error('Ada lokasi gudang yang tidak ditemukan.'),{status:400}); state.userLocations=state.userLocations||{}; state.userLocations[req.params.id]=ids; return {userId:req.params.id,locationIds:ids};}); res.json({success:true,message:'Akses lokasi akun berhasil diperbarui.',data:result,version}); }catch(e){res.status(e.status||500).json({success:false,message:e.message||'Gagal memperbarui akses lokasi.'});} });
 
 app.post('/api/state', auth, async (req,res)=>{
   const client=await pool.connect();
@@ -881,7 +919,8 @@ app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')))
 
 async function bootstrap(){
   await pool.query(`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, username text UNIQUE NOT NULL, password_hash text NOT NULL, name text NOT NULL, role text NOT NULL, email text, phone text, status text NOT NULL DEFAULT 'active', requested_role text, permissions jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS user_profiles (user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, name text, username text, email text, phone text, avatar_data text, updated_at timestamptz NOT NULL DEFAULT now());`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_profiles (user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, name text, username text, email text, phone text, store_name text, avatar_data text, updated_at timestamptz NOT NULL DEFAULT now());`);
+  try { await pool.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS store_name text;`); } catch(e) {}
   await pool.query(`CREATE TABLE IF NOT EXISTS security_logs (id bigserial PRIMARY KEY, user_id text, action text NOT NULL, detail text, ip text, user_agent text, created_at timestamptz NOT NULL DEFAULT now());`);
   try { await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;`); } catch(e){}
   try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_role text;`); } catch(e){}
@@ -892,9 +931,13 @@ async function bootstrap(){
   const exists=await pool.query('SELECT 1 FROM app_state WHERE id=1');
   if(!exists.rowCount){
     const seed=JSON.parse(fs.readFileSync(path.join(__dirname,'database','seed.json'),'utf8'));
-    await pool.query('INSERT INTO app_state(id,state,version) VALUES(1,$1::jsonb,1)',[JSON.stringify(Object.fromEntries(Object.entries(seed).filter(([k])=>k!=='users')))]);
+    const seeded=Object.fromEntries(Object.entries(seed).filter(([k])=>k!=='users')); seeded.locations=[{id:'GUD-01',name:seeded.settings?.warehouseName||'Gudang Utama',address:'',manager:'',status:'active',isDefault:true,createdAt:new Date().toISOString()}]; seeded.userLocations={}; (seed.users||[]).forEach(u=>{seeded.userLocations[u.id]=['GUD-01'];}); (seeded.inventory||[]).forEach(i=>{i.locationId='GUD-01';});
+    for(const key of ['stockIns','stockOuts','workReports','payoutRequests','sellerBookings','shippingResi','scannedResi','salesClosings','damagedGoods','returnedGoods','stockMutations','activityLogs']) if(Array.isArray(seeded[key])) seeded[key].forEach(x=>{if(x&&!x.locationId)x.locationId='GUD-01';});
+    await pool.query('INSERT INTO app_state(id,state,version) VALUES(1,$1::jsonb,1)',[JSON.stringify(seeded)]);
     await syncUsers(pool,seed.users||[]);
     console.log('Data awal berhasil diimpor.');
+  } else {
+    const r=await pool.query('SELECT state FROM app_state WHERE id=1'); const st=r.rows[0]?.state||{}; let changed=false; if(!Array.isArray(st.locations)||!st.locations.length){st.locations=[{id:'GUD-01',name:st.settings?.warehouseName||'Gudang Utama',address:'',manager:'',status:'active',isDefault:true,createdAt:new Date().toISOString()}];changed=true;} if(!st.userLocations){st.userLocations={}; changed=true;} for(const key of ['inventory','stockIns','stockOuts','workReports','payoutRequests','sellerBookings','shippingResi','scannedResi','salesClosings','damagedGoods','returnedGoods','stockMutations','activityLogs']) if(Array.isArray(st[key])) st[key].forEach(x=>{if(x&&!x.locationId){x.locationId='GUD-01';changed=true;}}); if(changed) await pool.query('UPDATE app_state SET state=$1::jsonb,version=version+1,updated_at=NOW() WHERE id=1',[JSON.stringify(st)]);
   }
   app.listen(PORT,'0.0.0.0',()=>console.log(`GUDANG BAT online server berjalan di port ${PORT}`));
 }
